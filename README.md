@@ -281,6 +281,10 @@ This hardware mechanism allows for nested branches and loops without software ov
 
 - **The Problem**: Imagine a loop with a `BAR`. If a fast warp reaches the barrier, waits, releases, and rapidly hits the _same_ barrier again in the next iteration before a slow warp has even reached it the _first_ time, the barrier logic could get confused (counting the fast warp's second arrival as the slow warp's first).
 - **The Solution**: The core implements a `barrier_epoch` bit that toggles every time the barrier resolves. Warps track their local "Seen Epoch". A warp contributes to the barrier only if its local epoch matches the global barrier epoch, ensuring that all warps must fully exit synchronization phase `N` before any can enter `N+1`.
+  
+
+<img width="2816" height="1536" alt="Gemini_Generated_Image_io7qqjio7qqjio7q" src="https://github.com/user-attachments/assets/a0002c9a-ff3f-49bf-af26-675eca5a85f3" />
+
 
 ### 4.5 Predicated Execution
 
@@ -308,6 +312,9 @@ The core supports **per-thread predication** to enable fine-grained conditional 
 ISETP.GT P1, R_x, 0
 @P1 MUL R_y, R_x, 2
 ```
+
+<img width="2816" height="1536" alt="Gemini_Generated_Image_lved18lved18lved" src="https://github.com/user-attachments/assets/b5b16378-6fa1-47d8-9ec4-da306981f358" />
+
 
 - **LSU Split Handling**: The LSU automatically detects when a warp's memory accesses span multiple 128-byte cache lines. It utilizes a **Replay Queue** to serialize these into multiple sequential requests to the memory system, transparently to the warp scheduler.
 

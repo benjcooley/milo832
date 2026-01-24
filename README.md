@@ -542,19 +542,21 @@ The core is capable of full 3D graphics orchestration. A dedicated demo (`TB/TB_
 
 <img width="512" height="512" alt="image" src="https://github.com/user-attachments/assets/7c77cd3b-b0fb-4d72-8466-1032b8ba3d04" />
 
-### 5.4 Benchmark: Parallel 3D Cube (SIMT Demo)
+### 5.4 Benchmark: Parallel Perspective Pyramid (SIMT)
 
-This kernel parallelizes the 3D Perspective Cube by assigning one thread to each vertex (8 active threads). It demonstrates a ~3x speedup over the sequential version.
+This benchmark (`TB/TB_SV/test_parallel_pyramid.sv`) parallelizes the rendering of a 5-vertex square pyramid. Each vertex is assigned to a unique SIMT thread, demonstrating vertex puller efficiency.
 
-```bash
-./verify_specific.sh TB_SV/test_parallel_cube.sv
-```
+- **Outcome**: Verifies correct handled of scatter/gather memory accesses during vertex fetch and predicated atomic writes to the framebuffer.
 
-- **Performance**: 34,368 Cycles (vs 99,312 sequential).
-- **Techniques**: SIMT Parallelism, Predicated Serialization (Software ROP).
-- **Outcome**: Verifies efficient SIMT execution and correct Register File bank conflict handling under heavy load.
+### 5.5 Benchmark: High-Density Parallel Torus (Stress Test)
 
-### 5.5 Limitations & Future Work
+The most sophisticated stress test for the core (`TB/TB_SV/test_parallel_torus.sv`). It renders a **512-vertex** parametric torus using a full 32-thread warp.
+
+- **Complexity**: 32 Parallel threads (Tube) x 16 Serial iterations (Ring).
+- **Hardware Hazard Verification**: Targets the **Hardware Predicate Scoreboard**. The shader performs `ISETP` immediately followed by predicated `LDR`/`STR`, verifying that the RTL automatically stalls the pipeline to prevent RAW hazards on predicate bits.
+- **Dynamic Animation**: Features a **Diagonal Tumble** (clockwise rotation on both X and Y axes) implemented via dynamic instruction patching during the simulation loop.
+
+### 5.6 Limitations & Future Work
 
 - **Rasterization**: Currently supports point-based vertex rendering; full triangle rasterization is a future milestone.
 - **L1 Cache**: While the LSU supports splits, the current model uses a `mock_memory`. Integration with a genuine set-associative L1 cache is planned as a next step.
@@ -618,6 +620,8 @@ TB/
 │   ├── test_lsu_split.sv           # Memory coalescing and split requests
 │   ├── test_memory_system.sv       # MSHR and transaction tracking
 │   ├── test_parallel_cube.sv       # Parallel (SIMT) 3D vertex shader
+│   ├── test_parallel_pyramid.sv    # SIMT Pyramid Renderer (5 threads)
+│   ├── test_parallel_torus.sv      # High-Density Torus (32 threads, 512 vertices)
 │   ├── test_perspective_cube.sv    # 3D Rendering with Perspective
 │   ├── test_pipeline_issue.sv      # Dual-issue structural hazards
 │   ├── test_rotated_cube.sv        # Orthographic 3D rotation
@@ -659,3 +663,5 @@ The testbench suite verifies:
 - LSU Multi-Line Split Handling
 - 3D Perspective Projection & Rotation
 - Parallel Vertex Processing (SIMT)
+- Hardware Predicate Scoreboard & Hazard Stalling
+- High-Density Compute Saturation (512+ Vertices)

@@ -115,6 +115,7 @@ module streaming_multiprocessor
     warp_state_e              warp_state        [NUM_WARPS];
     logic [WARP_SIZE-1:0]     warp_active_mask  [NUM_WARPS];
     logic [NUM_REGS-1:0]      warp_reg_writes   [NUM_WARPS];
+    logic [7:0]               warp_pred_writes  [NUM_WARPS]; // PREDICATE SCOREBOARD
     logic [$clog2(DIVERGENCE_STACK_DEPTH):0] warp_stack_ptr [NUM_WARPS];
     logic [$clog2(RETURN_STACK_DEPTH):0]     warp_ret_ptr   [NUM_WARPS];
     logic                     warp_at_barrier   [NUM_WARPS];
@@ -226,9 +227,16 @@ module streaming_multiprocessor
     // This allows scoreboard_ok to see clears before they're registered, solving
     // the NBA race condition where scoreboard clears happen in the NBA region
     logic [NUM_WARPS-1:0][NUM_REGS-1:0] reg_clear_this_cycle;
+    logic [NUM_WARPS-1:0][7:0]          pred_clear_this_cycle;
     
     always_comb begin
         reg_clear_this_cycle = '0;
+        pred_clear_this_cycle = '0;
+        
+        // Clear Predicate Scoreboard (From ALU WB)
+        if (alu_wb.valid && alu_wb.we_pred) begin
+            pred_clear_this_cycle[alu_wb.warp][alu_wb.rd[2:0]] = 1;
+        end
         
         // Clear Scoreboard from OC Writeback Ports (Sync & Async)
         for (int k=0; k<2; k++) begin
@@ -440,6 +448,17 @@ module streaming_multiprocessor
         scoreboard_ok = 1;
         
         if (op != OP_NOP && op != OP_EXIT) begin
+            // 0. Predicate Guard Dependency Check
+            logic [3:0] pg;
+            pg = inst[31:28]; // Predicate Guard Field
+            if (pg[2:0] != 7) begin // If not Always True (P7)
+                // Check if the predicate register is being written to
+                // Note: We check pred_writes vs pred_clear to handle back-to-back
+                if (warp_pred_writes[w][pg[2:0]] && !pred_clear_this_cycle[w][pg[2:0]]) begin
+                    scoreboard_ok = 0;
+                end
+            end
+
             // 1. Initial Busy Check against Registered Scoreboard Clear
             rs1_busy = warp_reg_writes[w][ 6'(rs1) ] && !reg_clear_q[w][ 6'(rs1) ];
             if (op inside {OP_ADD,OP_SUB,OP_MUL,OP_IMAD,OP_SLT,OP_LDR,OP_STR,OP_BEQ,OP_BNE,
@@ -682,6 +701,7 @@ module streaming_multiprocessor
             // Reset Scoreboard & Predicates here to be near reservation logic
             for (int w=0; w<NUM_WARPS; w++) begin
                 warp_reg_writes[w] <= 0; 
+                warp_pred_writes[w] <= 0; // Clear Predicate Scoreboard
                 for (int l=0; l<WARP_SIZE; l++) preds[w][l] <= 0;
             end
             oc_wb_valid_q   <= 0;
@@ -694,10 +714,12 @@ module streaming_multiprocessor
         end else begin
             // 1. Calculate Next State (Combinational Clear + Sequential Set)
             logic [NUM_REGS-1:0] next_sb [NUM_WARPS-1:0];
+            logic [7:0]          next_pred_sb [NUM_WARPS-1:0];
             
             for (int w=0; w<NUM_WARPS; w++) begin
                 // Start with current state, apply clears
                 next_sb[w] = warp_reg_writes[w] & ~reg_clear_this_cycle[w];
+                next_pred_sb[w] = warp_pred_writes[w] & ~pred_clear_this_cycle[w];
             end
             
             // Apply Predicate Updates (From ALU WB)
@@ -735,6 +757,13 @@ module streaming_multiprocessor
                                 next_sb[if_id[p].warp][ 6'(if_id[p].inst[55:48]) ] = 1;
                                 $display("CORE [%0t] SB SET:   Warp=%0d Reg=%d PC=%h", $time, if_id[p].warp, 6'(if_id[p].inst[55:48]), if_id[p].pc);
                             end
+                        end
+                        
+                        // Set Predicate Scoreboard
+                        if (op inside {OP_ISETP, OP_FSETP}) begin
+                             if (!(branch_taken_q && branch_warp_q == if_id[p].warp)) begin
+                                 next_pred_sb[if_id[p].warp][ if_id[p].inst[50:48] ] = 1; // RD is [2:0] for Pred Index
+                             end
                         end
                     end
                 end
@@ -799,6 +828,7 @@ module streaming_multiprocessor
             // 3. Commit Scoreboard Update (Unconditionally)
             for (int w=0; w<NUM_WARPS; w++) begin
                 warp_reg_writes[w] <= next_sb[w];
+                warp_pred_writes[w] <= next_pred_sb[w];
             end
         end
     end

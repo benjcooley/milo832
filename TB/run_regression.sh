@@ -41,7 +41,7 @@ echo "Found ${#TEST_FILES[@]} tests in $TB_SV_DIR"
 FLAGS="--binary -j 8 --Mdir obj_dir -I. -IRTL -IRTL/Core -IRTL/Compute -IRTL/Memory -IRTL/Compute/Arithmetic --trace --max-num-width 1024 -Wno-fatal --timing"
 
 # Includes (Generic for all tests)
-CORE_INCLUDES="RTL/Core/simt_pkg.sv RTL/Compute/sfu_pkg.sv RTL/Core/streaming_multiprocessor.sv RTL/Compute/int_alu.sv RTL/Compute/ALU.sv RTL/Compute/sfu_single_cycle.sv RTL/Memory/operand_collector.sv RTL/Memory/fifo.sv RTL/Memory/mock_memory.sv"
+CORE_INCLUDES="RTL/Core/simt_pkg.sv RTL/Compute/sfu_pkg.sv RTL/Core/streaming_multiprocessor.sv RTL/Compute/int_alu.sv RTL/Compute/ALU.sv RTL/Compute/sfu_single_cycle.sv RTL/Memory/operand_collector.sv RTL/Memory/fifo.sv RTL/Memory/mock_memory.sv RTL/Core/shared_memory.sv"
 
 passed=0
 failed=0

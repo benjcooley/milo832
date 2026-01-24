@@ -11,6 +11,7 @@ package simt_pkg;
     localparam NUM_REGS       = 64;
     localparam DIVERGENCE_STACK_DEPTH = 32;  // Divergence stack depth (SSY/JOIN)
     localparam RETURN_STACK_DEPTH = 8;  // Return address stack depth (CALL/RET)
+    localparam MAX_PENDING_PER_WARP = 64; // Increased to support 32 threads/warp
     
     
     // Derived parameter (for default configuration)

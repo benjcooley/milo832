@@ -188,19 +188,25 @@ module operand_collector
     //=========================================================================
     int release_rr_ptr;
     
+    int p0_idx_sel;
+    int p1_idx_sel;
+    
     always_comb begin
-        int p0_idx_comb;
-        p0_idx_comb = -1;
+        logic [15:0] next_warp_rel_comb [NUM_WARPS];
         
+        p0_idx_sel = -1;
+        p1_idx_sel = -1;
         ex_valid = 2'b00;
         ex_inst[0] = '{op: OP_NOP, default:0};
         ex_inst[1] = '{op: OP_NOP, default:0};
         
+        for (int w=0; w<NUM_WARPS; w++) next_warp_rel_comb[w] = warp_release_id[w];
+
         // Port 0: Standard Order-Aware Search
         for (int i=0; i<NUM_COLLECTORS; i++) begin
             int idx = (release_rr_ptr + i) % NUM_COLLECTORS;
             if (collectors[idx].state == READY && 
-                unit_issue_id[idx] == warp_release_id[collectors[idx].inst.warp]) begin
+                unit_issue_id[idx] == next_warp_rel_comb[collectors[idx].inst.warp]) begin
                 
                 id_ex_t rinst;
                 rinst = collectors[idx].inst;
@@ -210,22 +216,21 @@ module operand_collector
 
                 ex_valid[0] = 1;
                 ex_inst[0] = rinst;
-                p0_idx_comb = idx;
+                p0_idx_sel = idx;
+                next_warp_rel_comb[collectors[idx].inst.warp]++;
                 break;
             end
         end
         
         // Port 1: Dual-Issue search (Structural Disjoint + Order-Aware)
-        // DEBUG: DISABLED DUAL ISSUE to prevent deadlock
-        /*
         for (int i=0; i<NUM_COLLECTORS; i++) begin
             int idx = (release_rr_ptr + i) % NUM_COLLECTORS;
-            if (idx == p0_idx_comb) continue;
+            if (idx == p0_idx_sel) continue;
             
             if (collectors[idx].state == READY && 
-                unit_issue_id[idx] == warp_release_id[collectors[idx].inst.warp]) begin
+                unit_issue_id[idx] == next_warp_rel_comb[collectors[idx].inst.warp]) begin
                 
-                if (p0_idx_comb == -1 || 
+                if (p0_idx_sel == -1 || 
                     ( (get_unit_type(collectors[idx].inst.op) != get_unit_type(ex_inst[0].op)) &&
                       // STRICT Check: Block if BOTH are using ALU/CTRL backend resources
                       !((get_unit_type(collectors[idx].inst.op) == simt_pkg::UNIT_ALU || get_unit_type(collectors[idx].inst.op) == simt_pkg::UNIT_CTRL) && 
@@ -239,11 +244,11 @@ module operand_collector
 
                     ex_valid[1] = 1;
                     ex_inst[1] = rinst;
+                    p1_idx_sel = idx;
                     break;
                 end
             end
         end
-        */
     end
 
     //=========================================================================
@@ -272,28 +277,20 @@ module operand_collector
                ((dispatch_valid == 2'b01 || dispatch_valid == 2'b10) && dispatch_ready[0])) begin
                 
                 logic [15:0] count_tmp [NUM_WARPS];
+                int allocated_idx;
+                allocated_idx = -1;
+                
                 for (int w=0; w<NUM_WARPS; w++) count_tmp[w] = warp_issue_id[w];
-
-                if (dispatch_valid == 2'b11)
-                    $display("OC_DIAG [%0t] ATOMIC DUAL VALID. Ready=%b", $time, dispatch_ready);
 
                 for (int p=0; p<2; p++) begin
                     if (dispatch_valid[p]) begin
-                        int slots_to_skip;
-                        int skipped;
                         bit found_unit;
-                        slots_to_skip = (p == 1 && dispatch_valid[0]) ? 1 : 0;
-                        skipped = 0;
                         found_unit = 0;
                         
                         for (int i=0; i<NUM_COLLECTORS; i++) begin
-                            if (collectors[i].state == IDLE) begin
-                                if (skipped < slots_to_skip) begin
-                                    skipped++;
-                                    continue;
-                                end
-                                
+                            if (collectors[i].state == IDLE && i != allocated_idx) begin
                                 found_unit = 1;
+                                allocated_idx = i;
                                 collectors[i].state <= ALLOCATED;
                                 collectors[i].inst  <= dispatch_inst[p];
                                 unit_issue_id[i]    <= count_tmp[dispatch_inst[p].warp];
@@ -308,15 +305,14 @@ module operand_collector
                                 
                                 // Opcode-based needed_mask
                                 case (dispatch_inst[p].op)
-                                    OP_TID, OP_NOP, OP_EXIT: collectors[i].needed_mask <= 3'b000;
-                                    OP_LDR, OP_FABS, OP_FNEG, OP_NEG, OP_NOT, OP_ITOF, OP_FTOI,
+                                    OP_MOV, OP_TID, OP_LDR, OP_FABS, OP_FNEG, OP_NEG, OP_NOT, OP_ITOF, OP_FTOI,
                                     OP_SFU_SIN, OP_SFU_COS, OP_SFU_RCP, OP_SFU_RSQ, OP_SFU_SQRT, OP_SFU_EX2, OP_SFU_LG2,
                                     OP_POPC, OP_CLZ, OP_BREV, OP_CNOT, OP_LDS: 
                                         collectors[i].needed_mask <= 3'b001;
-                                    OP_STR, OP_BEQ, OP_BNE:
+                                    OP_STR, OP_BEQ, OP_BNE, OP_ISETP, OP_FSETP, OP_SEQ, OP_SLT, OP_SLE:
                                         collectors[i].needed_mask <= 3'b011;
                                     OP_FFMA, OP_IMAD: collectors[i].needed_mask <= 3'b111;
-                                    OP_BRA, OP_JOIN, OP_BAR, OP_SSY: collectors[i].needed_mask <= 3'b000;
+                                    OP_NOP, OP_EXIT, OP_BRA, OP_JOIN, OP_BAR, OP_SSY: collectors[i].needed_mask <= 3'b000;
                                     default: collectors[i].needed_mask <= 3'b011;
                                 endcase
                                 break;
@@ -410,7 +406,10 @@ module operand_collector
             if (flush_valid) begin
                 for (int i=0; i<NUM_COLLECTORS; i++) begin
                     if (collectors[i].state != IDLE && collectors[i].inst.warp == flush_warp) begin
-                        collectors[i].state <= IDLE;
+                        // Tag mismatch / Flush! Force READY as NOP to clear scoreboard in EX/WB
+                        collectors[i].state <= READY;
+                        collectors[i].inst.op <= OP_NOP;
+                        collectors[i].needed_mask <= 3'b000;
                     end
                 end
             end
@@ -427,56 +426,56 @@ module operand_collector
             end
 
             // 4. RELEASE (State Transition)
-            // Combined Port 0 and Port 1 release based on combinational ex_valid/ready
+            // Use the indices selected by the combinational block to ensure consistency
             begin
-                int p0_idx_seq;
-                p0_idx_seq = -1;
+                int rel_count;
+                rel_count = 0;
                 
                 // Port 0 Handle
-                if (ex_valid[0] && ex_ready[0]) begin
-                    for (int i=0; i<NUM_COLLECTORS; i++) begin
-                        int idx = (release_rr_ptr + i) % NUM_COLLECTORS;
-                        if (collectors[idx].state == READY && 
-                            unit_issue_id[idx] == warp_release_id[collectors[idx].inst.warp]) begin
-                            
-                            collectors[idx].state <= IDLE;
-                            warp_release_id[collectors[idx].inst.warp] <= warp_release_id[collectors[idx].inst.warp] + 1;
-                            p0_idx_seq = idx;
-                            collectors[idx].state <= IDLE;
-                            warp_release_id[collectors[idx].inst.warp] <= warp_release_id[collectors[idx].inst.warp] + 1;
-                            p0_idx_seq = idx;
-                            $display("OC [%0t] RELEASE: Unit %0d Warp %0d PC %h ID %d (P0)", $time, idx, collectors[idx].inst.warp, collectors[idx].inst.pc, unit_issue_id[idx]);
-                            
-                            if (!ex_valid[1] || !ex_ready[1]) release_rr_ptr <= (idx + 1) % NUM_COLLECTORS;
-                            break;
-                        end
-                    end
+                if (ex_valid[0] && ex_ready[0] && p0_idx_sel != -1) begin
+                    int idx = p0_idx_sel;
+                    collectors[idx].state <= IDLE;
+                    warp_release_id[collectors[idx].inst.warp] <= warp_release_id[collectors[idx].inst.warp] + 1;
+                    $display("OC [%0t] RELEASE: Unit %0d Warp %0d PC %h ID %d (P0)", $time, idx, collectors[idx].inst.warp, collectors[idx].inst.pc, unit_issue_id[idx]);
+                    rel_count++;
                 end
                 
                 // Port 1 Handle
-                if (ex_valid[1] && ex_ready[1]) begin
-                    for (int i=0; i<NUM_COLLECTORS; i++) begin
-                        int idx = (release_rr_ptr + i) % NUM_COLLECTORS;
-                        if (idx == p0_idx_seq) continue;
-                        
-                        if (collectors[idx].state == READY && 
-                            unit_issue_id[idx] == warp_release_id[collectors[idx].inst.warp]) begin
-                            
-                            if (p0_idx_seq == -1 || (get_type(collectors[idx].inst.op) != get_type(ex_inst[0].op))) begin
-                                collectors[idx].state <= IDLE;
-                                warp_release_id[collectors[idx].inst.warp] <= warp_release_id[collectors[idx].inst.warp] + 1;
-                                warp_release_id[collectors[idx].inst.warp] <= warp_release_id[collectors[idx].inst.warp] + 1;
-                                $display("OC [%0t] RELEASE: Unit %0d Warp %0d PC %h ID %d (P1)", $time, idx, collectors[idx].inst.warp, collectors[idx].inst.pc, unit_issue_id[idx]);
-                                release_rr_ptr <= (idx + 1) % NUM_COLLECTORS;
-                                release_rr_ptr <= (idx + 1) % NUM_COLLECTORS;
-                                break;
-                            end
-                        end
+                if (ex_valid[1] && ex_ready[1] && p1_idx_sel != -1) begin
+                    int idx = p1_idx_sel;
+                    collectors[idx].state <= IDLE;
+                    // If same warp as P0, the sequence increment must be handled.
+                    // But warp_release_id is sequential. We need to handle double increment.
+                    if (ex_valid[0] && ex_ready[0] && collectors[p1_idx_sel].inst.warp == collectors[p0_idx_sel].inst.warp) begin
+                         warp_release_id[collectors[idx].inst.warp] <= warp_release_id[collectors[idx].inst.warp] + 2;
+                    end else begin
+                         warp_release_id[collectors[idx].inst.warp] <= warp_release_id[collectors[idx].inst.warp] + 1;
+                    end
+                    $display("OC [%0t] RELEASE: Unit %0d Warp %0d PC %h ID %d (P1)", $time, idx, collectors[idx].inst.warp, collectors[idx].inst.pc, unit_issue_id[idx]);
+                    rel_count++;
+                end
+
+                // Update round-robin pointer
+                if (p1_idx_sel != -1) release_rr_ptr <= (p1_idx_sel + 1) % NUM_COLLECTORS;
+                else if (p0_idx_sel != -1) release_rr_ptr <= (p0_idx_sel + 1) % NUM_COLLECTORS;
+            end
+            
+            // 5. DEADLOCK DIAGNOSTIC
+            cycle_count <= cycle_count + 1;
+            for (int i=0; i<NUM_COLLECTORS; i++) begin
+                if (collectors[i].state != IDLE) begin
+                    if (cycle_count % 10000 == 0) begin
+                        $display("OC_DIAG [%0t] Unit %0d Stuck: Warp %0d PC %h State %s Needs %b R1R=%b R2R=%b R3R=%b ID %d RelID %d", 
+                                 $time, i, collectors[i].inst.warp, collectors[i].inst.pc, 
+                                 collectors[i].state.name(), collectors[i].needed_mask,
+                                 rs1_ready[i], rs2_ready[i], rs3_ready[i],
+                                 unit_issue_id[i], warp_release_id[collectors[i].inst.warp]);
                     end
                 end
             end
         end
     end
 
-    // Debug logic removed
+    longint cycle_count;
+    initial cycle_count = 0;
 endmodule

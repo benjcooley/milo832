@@ -247,8 +247,6 @@ module streaming_multiprocessor
                 // Assuming logic added via implicit wire connection or we decode src
                 // For simplified logic: checks specific to Memory WB logic below
                 reg_clear_this_cycle[oc_wb_warp[k]][oc_wb_rd[k]] = 1;
-                if ((oc_wb_warp[k] == 4 && oc_wb_rd[k] == 1) || (oc_wb_warp[k] == 6 && oc_wb_rd[k] == 14))
-                    $display("CORE [%0t] SB_TRACE CLR: Warp %0d Reg %0d Port %d", $time, oc_wb_warp[k], oc_wb_rd[k], k);
 
                 // Optimization: We could qualify with last_split here if we routed it.
                 // For now, let's rely on the upstream (Atomic WB) NOT setting Valid if it shouldn't clear?
@@ -539,16 +537,47 @@ module streaming_multiprocessor
                             scoreboard_ok = 0;
                         end
                     end
+                    
+                    // Predicate RAW Check: If Lookahead instruction writes a predicate we need
+                    if (if_op inside {OP_ISETP, OP_FSETP}) begin
+                        logic [2:0] if_pred_rd;
+                        if_pred_rd = if_id[p].inst[50:48]; // Predicate Destination
+                        
+                        // Check if we use it as Guard
+                        if (pg[2:0] != 7 && pg[2:0] == if_pred_rd) scoreboard_ok = 0;
+                        
+                        // Check if we use it as Source (SELP)
+                        if (op == OP_SELP && inst[2:0] == if_pred_rd) scoreboard_ok = 0;
+                    end
                 end
             end
         end
     endfunction
 
-
-
-
-
-
+    // Function: Check Dual Issue Eligibility
+    function automatic logic can_dual_issue(input logic [63:0] inst_a, input logic [63:0] inst_b);
+        opcode_t op_a, op_b;
+        unit_type_e type_a, type_b;
+        
+        op_a = opcode_t'(inst_a[63:56]);
+        op_b = opcode_t'(inst_b[63:56]);
+        
+        type_a = get_unit_type(op_a);
+        type_b = get_unit_type(op_b);
+        
+        // Rule: Must target different execution units (Structural Hazard Check)
+        // Exceptions can be made if we have multiple units (e.g., 2 ALUs), but currently we route by Type.
+        // ALU and CTRL share the ALU/Branch unit.
+        // LSU has its own FIFO.
+        // FPU/SFU share the Float unit.
+        
+        if (type_a == type_b) return 0;
+        
+        // Additional constraint: Control flow instructions usually force single issue in Kepler
+        if (type_a == UNIT_CTRL || type_b == UNIT_CTRL) return 0;
+        
+        return 1;
+    endfunction
 
     // Scheduler Logic
     logic [NUM_WARPS-1:0] issue_eligible_mask;
@@ -611,6 +640,7 @@ module streaming_multiprocessor
     // Scheduler temporary variables (moved outside procedural block for synthesis)
     logic sched_found;
     int   sched_eligible_count;
+    logic intra_hazard;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -686,7 +716,41 @@ module streaming_multiprocessor
                         if_id[0].branch_tag <= warp_branch_tag[selected_warp];
                         
                         // Check if we can dual-issue second instruction
-                        can_dual = can_dual_issue(inst_a, inst_b) && scoreboard_ok(int'(selected_warp), inst_b) && oc_dispatch_ready[1];
+                        // Intra-packet check: inst_b cannot depend on inst_a
+                        begin : dual_hazard_check
+                            opcode_t op_a, op_b;
+                            logic [7:0] rd_a, rs1_b, rs2_b, rs3_b;
+                            logic writes_a;
+                            
+                            op_a = opcode_t'(inst_a[63:56]);
+                            op_b = opcode_t'(inst_b[63:56]);
+                            rd_a = inst_a[55:48];
+                            rs1_b = inst_b[47:40];
+                            rs2_b = inst_b[39:32];
+                            rs3_b = inst_b[27:20];
+                            
+                            // Check if inst_a writes to a register
+                            writes_a = (op_a inside {OP_ADD,OP_SUB,OP_MUL,OP_IMAD,OP_SLT,OP_LDR,OP_MOV,OP_TID,
+                                                   OP_FADD,OP_FSUB,OP_FMUL,OP_FDIV,OP_FFMA,OP_SFU_SIN,OP_SFU_COS,
+                                                   OP_ITOF,OP_FTOI,OP_IDIV,OP_IREM,OP_AND,OP_OR,OP_XOR,OP_NOT,
+                                                   OP_SHL,OP_SHR,OP_SHA,OP_ISETP,OP_FSETP,OP_LDS});
+                            
+                            intra_hazard = 0;
+                            if (writes_a) begin
+                                if (rd_a == rs1_b || rd_a == rs2_b || rd_a == rs3_b || rd_a == inst_b[55:48]) begin
+                                    intra_hazard = 1;
+                                end
+                            end
+                            
+                            // Predicate RAW Hazard: inst_a writes Px, inst_b reads Px
+                            if (op_a == OP_ISETP || op_a == OP_FSETP) begin
+                                logic [2:0] pred_rd_a = inst_a[50:48];
+                                if (inst_b[31:28] != 4'h7 && inst_b[30:28] == pred_rd_a) intra_hazard = 1; // Guard
+                                if (op_b == OP_SELP && inst_b[2:0] == pred_rd_a) intra_hazard = 1;         // Source
+                            end
+                        end
+                        
+                        can_dual = can_dual_issue(inst_a, inst_b) && !intra_hazard && scoreboard_ok(int'(selected_warp), inst_b) && oc_dispatch_ready[1];
                         
                         if (can_dual) begin
                             // Dual-issue: Issue both instructions
@@ -757,12 +821,15 @@ module streaming_multiprocessor
                 next_pred_sb[w] = warp_pred_writes[w] & ~pred_clear_this_cycle[w];
             end
             
-            // Apply Predicate Updates (From ALU WB)
-            if (alu_wb.valid && alu_wb.we_pred) begin
+            // Apply Predicate Updates (From Sync WB or Async MEM_RESP)
+            if (oc_wb_valid[0] && oc_wb_we_pred_q[0]) begin
                  for (int l=0; l<WARP_SIZE; l++) begin
-                     if (alu_wb.mask[l]) begin
-                         preds[alu_wb.warp][l][alu_wb.rd[2:0]] <= alu_wb.result[l][0];
-                     end
+                     if (oc_wb_mask_q[0][l]) preds[oc_wb_warp_q[0]][l][oc_wb_rd_q[0][2:0]] <= oc_wb_result_q[0][l][0];
+                 end
+            end
+            if (oc_wb_valid[1] && oc_wb_we_pred_q[1]) begin
+                 for (int l=0; l<WARP_SIZE; l++) begin
+                     if (oc_wb_mask_q[1][l]) preds[oc_wb_warp_q[1]][l][oc_wb_rd_q[1][2:0]] <= oc_wb_result_q[1][l][0];
                  end
             end
 
@@ -772,6 +839,13 @@ module streaming_multiprocessor
                     if (if_id[p].valid) begin
                         opcode_t op;
                         op = opcode_t'(if_id[p].inst[63:56]);
+
+                        // SECURITY: Do NOT set SB if instruction is Trash (Tag Mismatch)
+                        if (if_id[p].branch_tag != warp_branch_tag[if_id[p].warp]) continue;
+                        
+                        // SECURITY: Do NOT set SB if instruction is currently being Flushed (Branch Taken NOW)
+                        if (cur_branch_taken && cur_branch_warp == if_id[p].warp) continue;
+
                         if (op inside {OP_ADD,OP_SUB,OP_MUL,OP_IMAD,OP_SLT,OP_LDR,OP_MOV,OP_TID,
                                                            OP_FADD,OP_FSUB,OP_FMUL,OP_FDIV,OP_FTOI,
                                                            OP_SFU_SIN,OP_SFU_COS,OP_SFU_EX2,OP_SFU_LG2,
@@ -785,14 +859,11 @@ module streaming_multiprocessor
                                                            OP_POPC,OP_CLZ,OP_BREV,OP_ITOF,
                                                            OP_NEG, OP_FNEG,
                                                            OP_CNOT,
-                                                           OP_SLE,OP_SEQ,OP_ISETP,OP_FSETP,
+                                                           OP_SLE,OP_SEQ,
                                                            OP_LDS}) begin
-                            // Check for Branch Flush (Shadow Instruction)
+                            // Check for Branch Flush (Legacy Check - possibly redundant but safe)
                             if (!(branch_taken_q && branch_warp_q == if_id[p].warp)) begin
                                 next_sb[if_id[p].warp][ 6'(if_id[p].inst[55:48]) ] = 1;
-                                if ((if_id[p].warp == 4 && 6'(if_id[p].inst[55:48]) == 1) || (if_id[p].warp == 6 && 6'(if_id[p].inst[55:48]) == 14))
-                                    $display("CORE [%0t] SB_TRACE SET: Warp %0d Reg %0d at PC %h", $time, if_id[p].warp, 6'(if_id[p].inst[55:48]), if_id[p].pc);
-                                $display("CORE [%0t] SB SET:   Warp=%0d Reg=%d PC=%h", $time, if_id[p].warp, 6'(if_id[p].inst[55:48]), if_id[p].pc);
                             end
                         end
                         
@@ -990,6 +1061,7 @@ module streaming_multiprocessor
                      if (!alu_full) begin
                         alu_push = 1; alu_din = oc_ex_inst[0];
                         oc_ex_ready[0] = 1;
+                        $display("CORE [%0t] ROUTER_P0: ALU Push Warp=%0d PC=%h Op=%s", $time, oc_ex_inst[0].warp, oc_ex_inst[0].pc, oc_ex_inst[0].op.name());
                     end
                 end
             endcase
@@ -1014,6 +1086,7 @@ module streaming_multiprocessor
                      if (!alu_push && !alu_full) begin
                         alu_push = 1; alu_din = oc_ex_inst[1];
                         oc_ex_ready[1] = 1;
+                        $display("CORE [%0t] ROUTER_P1: ALU Push Warp=%0d PC=%h Op=%s", $time, oc_ex_inst[1].warp, oc_ex_inst[1].pc, oc_ex_inst[1].op.name());
                     end
                 end
             endcase
@@ -2102,8 +2175,8 @@ module streaming_multiprocessor
     end
 
     // Consumption logic for stallable LSU pipeline
-    assign lsu_mem_consumed = (lsu_mem.valid && lsu_mem.op == OP_NOP) || // Squash consumed in 1 cycle
-                              (lsu_mem.valid && (lsu_mem.op == OP_LDS || lsu_mem.op == OP_STS) && !shared_mem_stall_cpu) || // Shared consumed if no stall
+    assign lsu_mem_consumed = (lsu_mem.valid && lsu_mem.op == OP_NOP && mem_resp_wb_next.src == WB_SQUASH) || // Squash consumed only if WB granted
+                              (lsu_mem.valid && (lsu_mem.op == OP_LDS || lsu_mem.op == OP_STS) && !shared_mem_stall_cpu && mem_resp_wb_next.valid) || // Shared consumed if no stall
                               (!current_is_replay && mem_request_valid); // New global request consumed if issued
 
     // ------------------------------------------------------------------------
@@ -2479,4 +2552,13 @@ module streaming_multiprocessor
         end
     end
 
+    // Warp 7 diagnostic block
+    always_ff @(posedge clk) begin
+        static int cycle_diag = 0;
+        cycle_diag++;
+        if (cycle_diag % 100 == 0) begin
+            $display("CORE [%0t] WARP7_DIAG: PC=%h State=%s SB=%b PredSB=%b MSHR=%d", 
+                     $time, warp_pc[7], warp_state[7].name(), warp_reg_writes[7], warp_pred_writes[7], mshr_count[7]);
+        end
+    end
 endmodule

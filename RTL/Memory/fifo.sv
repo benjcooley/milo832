@@ -40,11 +40,11 @@ module fifo #(
     assign empty = (wr_ptr == rd_ptr);
     
     // Count calculation
+    logic [PTR_WIDTH:0] ptr_diff;
+    assign ptr_diff = wr_ptr - rd_ptr;
+    
     always_comb begin
-        if (wr_ptr >= rd_ptr)
-            count = wr_ptr - rd_ptr;
-        else
-            count = (DEPTH - rd_ptr) + wr_ptr;
+        count = int'(ptr_diff);
     end
     
     // Peek at front (combinational read)

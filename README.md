@@ -34,7 +34,6 @@ The core implements an in-order, dual-issue 5-stage pipeline with out-of-order m
 
 <img width="2816" height="1536" alt="image" src="https://github.com/user-attachments/assets/7c6707d8-4dd8-4dc3-a08f-62f5798bb0e3" />
 
-
 #### Stage 1: IF (Instruction Fetch)
 
 - **Warp Scheduler**: Utilizes a Loose Round-Robin policy to select "Ready" warps.
@@ -244,10 +243,8 @@ The Operand Collector is a critical microarchitectural feature inspired by NVIDI
   2.  The CU requests operands from the **Bank Arbiter**.
   3.  The Arbiter grants access based on bank availability (Interleaved Layout: `Bank = RegID % 4`).
   4.  Once all operands are collected, the CU becomes **READY** and dispatches to the Execution Units.
-     
 
   <img width="2816" height="1536" alt="image" src="https://github.com/user-attachments/assets/86b3ae2d-6af3-47ca-badc-dc51a82482b1" />
-  
 
 ### 4.2 Divergence Stack (SSY/JOIN)
 
@@ -268,7 +265,6 @@ This hardware mechanism allows for nested branches and loops without software ov
 
 <img width="2816" height="1536" alt="image" src="https://github.com/user-attachments/assets/672f6bb3-55a1-4032-b976-cc6f48fe1fda" />
 
-
 ### 4.3 Shared Memory System
 
 - **Capacity**: 16KB per Streaming Multiprocessor (SM).
@@ -281,10 +277,8 @@ This hardware mechanism allows for nested branches and loops without software ov
 
 - **The Problem**: Imagine a loop with a `BAR`. If a fast warp reaches the barrier, waits, releases, and rapidly hits the _same_ barrier again in the next iteration before a slow warp has even reached it the _first_ time, the barrier logic could get confused (counting the fast warp's second arrival as the slow warp's first).
 - **The Solution**: The core implements a `barrier_epoch` bit that toggles every time the barrier resolves. Warps track their local "Seen Epoch". A warp contributes to the barrier only if its local epoch matches the global barrier epoch, ensuring that all warps must fully exit synchronization phase `N` before any can enter `N+1`.
-  
 
 <img width="2816" height="1536" alt="Gemini_Generated_Image_io7qqjio7qqjio7q" src="https://github.com/user-attachments/assets/a0002c9a-ff3f-49bf-af26-675eca5a85f3" />
-
 
 ### 4.5 Predicated Execution
 
@@ -314,7 +308,6 @@ ISETP.GT P1, R_x, 0
 ```
 
 <img width="2816" height="1536" alt="Gemini_Generated_Image_lved18lved18lved" src="https://github.com/user-attachments/assets/b5b16378-6fa1-47d8-9ec4-da306981f358" />
-
 
 - **LSU Split Handling**: The LSU automatically detects when a warp's memory accesses span multiple 128-byte cache lines. It utilizes a **Replay Queue** to serialize these into multiple sequential requests to the memory system, transparently to the warp scheduler.
 
@@ -648,8 +641,36 @@ cd TB
 
 ```bash
 cd TB
-./verify_specific.sh test_app_matmul
+# Example: Running the MatMul test
+./verify_specific.sh TB_SV/test_app_matmul.sv
+
+# Example: Running the Torus animation benchmark
+./verify_specific.sh TB_SV/test_parallel_torus.sv
 ```
+
+### Animation & Visualization
+
+To generate 3D animations after running a graphical benchmark (e.g., Torus, Cube, Pyramid):
+
+1. **Prerequisites**: Ensure you have Python 3 and the `Pillow` library installed.
+
+   ```bash
+   pip install Pillow
+   ```
+
+2. **Generate GIF**: The simulation saves frame artifacts as `.ppm` files in the temporary build directory (`/tmp/gpu_verify_specific/`). Use the provided Python scripts to compile them:
+   - **For Torus**:
+     ```bash
+     cd TB
+     python3 visualize_torus.py "/tmp/gpu_verify_specific/torus_frame_*.ppm" torus_animation.gif
+     ```
+   - **For Wireframe Cube**:
+     ```bash
+     cd TB
+     python3 visualize_fb.py "/tmp/gpu_verify_specific/frame_*.ppm" cube_animation.gif
+     ```
+
+3. **Check Output**: The script will process the individual frames and save an optimized animated GIF.
 
 ### Test Coverage
 

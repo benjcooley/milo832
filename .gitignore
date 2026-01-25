@@ -1,0 +1,6 @@
+*.ppm
+*.log
+*.vpd
+obj_dir/
+/tmp/
+.DS_Store

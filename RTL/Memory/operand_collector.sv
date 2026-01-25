@@ -56,9 +56,11 @@ module operand_collector
         for (int p = 0; p < 2; p++) begin
             if (wb_valid[p]) begin
                 logic [1:0] b;
-                logic [5:0] r_idx;
-                b = wb_rd[p][1:0];
-                r_idx = wb_rd[p] >> 2;
+                logic [3:0] r_idx; // 16 entries per bank for 64 regs
+                logic [5:0] rd_sanitized;
+                rd_sanitized = wb_rd[p][5:0];
+                b = rd_sanitized[1:0];
+                r_idx = rd_sanitized[5:2];
                 for (int i = 0; i < WARP_SIZE; i++) begin
                     if (wb_mask[p][i]) begin
                         rf_bank_phys[b][i][wb_warp[p]][r_idx] <= wb_data[p][i];
@@ -130,9 +132,9 @@ module operand_collector
             if (collectors[i].state == ALLOCATED) begin
                 for (int p=0; p<2; p++) begin
                     if (wb_valid[p] && wb_warp[p] == collectors[i].inst.warp && |wb_mask[p]) begin
-                        if (collectors[i].inst.rs1_idx == wb_rd[p]) rs1_forwarded[i] = 1;
-                        if (collectors[i].inst.rs2_idx == wb_rd[p]) rs2_forwarded[i] = 1;
-                        if (collectors[i].inst.rs3_idx == wb_rd[p]) rs3_forwarded[i] = 1;
+                        if (collectors[i].inst.rs1_idx[5:0] == wb_rd[p][5:0]) rs1_forwarded[i] = 1;
+                        if (collectors[i].inst.rs2_idx[5:0] == wb_rd[p][5:0]) rs2_forwarded[i] = 1;
+                        if (collectors[i].inst.rs3_idx[5:0] == wb_rd[p][5:0]) rs3_forwarded[i] = 1;
                     end
                 end
             end
@@ -214,6 +216,8 @@ module operand_collector
         end
         
         // Port 1: Dual-Issue search (Structural Disjoint + Order-Aware)
+        // DEBUG: DISABLED DUAL ISSUE to prevent deadlock
+        /*
         for (int i=0; i<NUM_COLLECTORS; i++) begin
             int idx = (release_rr_ptr + i) % NUM_COLLECTORS;
             if (idx == p0_idx_comb) continue;
@@ -223,8 +227,9 @@ module operand_collector
                 
                 if (p0_idx_comb == -1 || 
                     ( (get_unit_type(collectors[idx].inst.op) != get_unit_type(ex_inst[0].op)) &&
-                      !((get_unit_type(collectors[idx].inst.op) == UNIT_ALU && get_unit_type(ex_inst[0].op) == UNIT_CTRL) ||
-                        (get_unit_type(collectors[idx].inst.op) == UNIT_CTRL && get_unit_type(ex_inst[0].op) == UNIT_ALU))
+                      // STRICT Check: Block if BOTH are using ALU/CTRL backend resources
+                      !((get_unit_type(collectors[idx].inst.op) == simt_pkg::UNIT_ALU || get_unit_type(collectors[idx].inst.op) == simt_pkg::UNIT_CTRL) && 
+                        (get_unit_type(ex_inst[0].op) == simt_pkg::UNIT_ALU || get_unit_type(ex_inst[0].op) == simt_pkg::UNIT_CTRL))
                     )) begin
                     id_ex_t rinst;
                     rinst = collectors[idx].inst;
@@ -238,6 +243,7 @@ module operand_collector
                 end
             end
         end
+        */
     end
 
     //=========================================================================
@@ -329,21 +335,24 @@ module operand_collector
             for (int b=0; b<4; b++) begin
                 if (bank_req_valid[b]) begin
                     int idx = bank_arb_idx[b];
-                    if (!rs1_ready[idx] && collectors[idx].needed_mask[0] && (collectors[idx].inst.rs1_idx % 4 == b)) begin
+                    logic [5:0] rs1_idx_sanitized = collectors[idx].inst.rs1_idx[5:0];
+                    if (!rs1_ready[idx] && collectors[idx].needed_mask[0] && (rs1_idx_sanitized[1:0] == b)) begin
                         for (int l=0; l<WARP_SIZE; l++) begin
-                            rs1_data[idx][l] <= rf_bank_phys[b][l][collectors[idx].inst.warp][collectors[idx].inst.rs1_idx >> 2];
+                            rs1_data[idx][l] <= rf_bank_phys[b][l][collectors[idx].inst.warp][rs1_idx_sanitized[5:2]];
                         end
                         rs1_ready[idx] <= 1;
                     end
-                    else if (!rs2_ready[idx] && collectors[idx].needed_mask[1] && (collectors[idx].inst.rs2_idx % 4 == b)) begin
+                    else if (!rs2_ready[idx] && collectors[idx].needed_mask[1] && (collectors[idx].inst.rs2_idx[5:0][1:0] == b)) begin
+                        logic [5:0] rs2_idx_sanitized = collectors[idx].inst.rs2_idx[5:0];
                         for (int l=0; l<WARP_SIZE; l++) begin
-                            rs2_data[idx][l] <= rf_bank_phys[b][l][collectors[idx].inst.warp][collectors[idx].inst.rs2_idx >> 2];
+                            rs2_data[idx][l] <= rf_bank_phys[b][l][collectors[idx].inst.warp][rs2_idx_sanitized[5:2]];
                         end
                         rs2_ready[idx] <= 1;
                     end
-                    else if (!rs3_ready[idx] && collectors[idx].needed_mask[2] && (collectors[idx].inst.rs3_idx % 4 == b)) begin
+                    else if (!rs3_ready[idx] && collectors[idx].needed_mask[2] && (collectors[idx].inst.rs3_idx[5:0][1:0] == b)) begin
+                        logic [5:0] rs3_idx_sanitized = collectors[idx].inst.rs3_idx[5:0];
                         for (int l=0; l<WARP_SIZE; l++) begin
-                            rs3_data[idx][l] <= rf_bank_phys[b][l][collectors[idx].inst.warp][collectors[idx].inst.rs3_idx >> 2];
+                            rs3_data[idx][l] <= rf_bank_phys[b][l][collectors[idx].inst.warp][rs3_idx_sanitized[5:2]];
                         end
                         rs3_ready[idx] <= 1;
                     end
@@ -362,17 +371,17 @@ module operand_collector
                             // NOTE: Prioritized over RF Read because Bank Arbiter is gated by !rsX_forwarded.
                             // Even if a collision happened (race), this assignment would win (last assignment wins in block), 
                             // ensuring the FRESH forwarded value is kept.
-                            if (!rs1_ready[i] && collectors[i].needed_mask[0] && collectors[i].inst.rs1_idx == wb_rd[p]) begin
+                            if (!rs1_ready[i] && collectors[i].needed_mask[0] && (collectors[i].inst.rs1_idx[5:0] == wb_rd[p][5:0])) begin
                                 rs1_data[i] <= wb_data[p];
                                 rs1_ready[i] <= 1;
                             end
                             // Check RS2
-                            if (!rs2_ready[i] && collectors[i].needed_mask[1] && collectors[i].inst.rs2_idx == wb_rd[p]) begin
+                            if (!rs2_ready[i] && collectors[i].needed_mask[1] && (collectors[i].inst.rs2_idx[5:0] == wb_rd[p][5:0])) begin
                                 rs2_data[i] <= wb_data[p];
                                 rs2_ready[i] <= 1;
                             end
                             // Check RS3
-                            if (!rs3_ready[i] && collectors[i].needed_mask[2] && collectors[i].inst.rs3_idx == wb_rd[p]) begin
+                            if (!rs3_ready[i] && collectors[i].needed_mask[2] && (collectors[i].inst.rs3_idx[5:0] == wb_rd[p][5:0])) begin
                                 rs3_data[i] <= wb_data[p];
                                 rs3_ready[i] <= 1;
                             end
@@ -433,6 +442,9 @@ module operand_collector
                             collectors[idx].state <= IDLE;
                             warp_release_id[collectors[idx].inst.warp] <= warp_release_id[collectors[idx].inst.warp] + 1;
                             p0_idx_seq = idx;
+                            collectors[idx].state <= IDLE;
+                            warp_release_id[collectors[idx].inst.warp] <= warp_release_id[collectors[idx].inst.warp] + 1;
+                            p0_idx_seq = idx;
                             $display("OC [%0t] RELEASE: Unit %0d Warp %0d PC %h ID %d (P0)", $time, idx, collectors[idx].inst.warp, collectors[idx].inst.pc, unit_issue_id[idx]);
                             
                             if (!ex_valid[1] || !ex_ready[1]) release_rr_ptr <= (idx + 1) % NUM_COLLECTORS;
@@ -453,7 +465,9 @@ module operand_collector
                             if (p0_idx_seq == -1 || (get_type(collectors[idx].inst.op) != get_type(ex_inst[0].op))) begin
                                 collectors[idx].state <= IDLE;
                                 warp_release_id[collectors[idx].inst.warp] <= warp_release_id[collectors[idx].inst.warp] + 1;
+                                warp_release_id[collectors[idx].inst.warp] <= warp_release_id[collectors[idx].inst.warp] + 1;
                                 $display("OC [%0t] RELEASE: Unit %0d Warp %0d PC %h ID %d (P1)", $time, idx, collectors[idx].inst.warp, collectors[idx].inst.pc, unit_issue_id[idx]);
+                                release_rr_ptr <= (idx + 1) % NUM_COLLECTORS;
                                 release_rr_ptr <= (idx + 1) % NUM_COLLECTORS;
                                 break;
                             end

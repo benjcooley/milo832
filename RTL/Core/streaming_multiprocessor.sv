@@ -247,6 +247,8 @@ module streaming_multiprocessor
                 // Assuming logic added via implicit wire connection or we decode src
                 // For simplified logic: checks specific to Memory WB logic below
                 reg_clear_this_cycle[oc_wb_warp[k]][oc_wb_rd[k]] = 1;
+                if ((oc_wb_warp[k] == 4 && oc_wb_rd[k] == 1) || (oc_wb_warp[k] == 6 && oc_wb_rd[k] == 14))
+                    $display("CORE [%0t] SB_TRACE CLR: Warp %0d Reg %0d Port %d", $time, oc_wb_warp[k], oc_wb_rd[k], k);
 
                 // Optimization: We could qualify with last_split here if we routed it.
                 // For now, let's rely on the upstream (Atomic WB) NOT setting Valid if it shouldn't clear?
@@ -432,6 +434,36 @@ module streaming_multiprocessor
     // Round-Robin Pointer
     int rr_ptr;
     
+    // Diagnostic Function: Print blocked registers
+    function automatic void scoreboard_diag(input int w, input logic [63:0] inst);
+        logic [7:0] rs1, rs2, rd, rs3;
+        opcode_t op;
+        logic rs1_busy, rs2_busy, rs3_busy, rd_busy;
+        
+        op  = opcode_t'(inst[63:56]);
+        rd  = inst[55:48];
+        rs1 = inst[47:40];
+        rs2 = inst[39:32];
+        rs3 = inst[27:20];
+        
+        rs1_busy = warp_reg_writes[w][ 6'(rs1) ] && !reg_clear_q[w][ 6'(rs1) ];
+        rs2_busy = warp_reg_writes[w][ 6'(rs2) ] && !reg_clear_q[w][ 6'(rs2) ];
+        rs3_busy = warp_reg_writes[w][ 6'(rs3) ] && !reg_clear_q[w][ 6'(rs3) ];
+        rd_busy = warp_reg_writes[w][ 6'(rd) ] && !reg_clear_q[w][ 6'(rd) ];
+
+    $display("CORE [%0t] SB_DIAG: Warp %0d PC=%h Op=%s RS1(%0d)=%b RS2(%0d)=%b RS3(%0d)=%b RD(%0d)=%b", 
+                 $time, w, warp_pc[w], op.name(), rs1, rs1_busy, rs2, rs2_busy, rs3, rs3_busy, rd, rd_busy);
+        
+        // Match in OC
+        for (int i=0; i<NUM_COLLECTORS; i++) begin
+            if (oc_inst.collectors[i].state != 0 && oc_inst.collectors[i].inst.warp == 5'(w)) begin
+                $display("CORE [%0t] OC_MATCH: Unit %0d Warp %0d PC=%h State=%s RS1_Rdy=%b RS2_Rdy=%b RS3_Rdy=%b Needs=%b",
+                         $time, i, w, oc_inst.collectors[i].inst.pc, oc_inst.collectors[i].state.name(), 
+                         oc_inst.rs1_ready[i], oc_inst.rs2_ready[i], oc_inst.rs3_ready[i], oc_inst.collectors[i].needed_mask);
+            end
+        end
+    endfunction
+    
 
     // Function: Scoreboard Check
     function automatic logic scoreboard_ok(input int w, input logic [63:0] inst);
@@ -523,7 +555,14 @@ module streaming_multiprocessor
         for (int w=0; w<NUM_WARPS; w++) begin
             issue_eligible_mask[w] = 0;
             if (warp_state[w] == W_READY) begin
-                if (scoreboard_ok(int'(w), prog_mem[w][ warp_pc[w][7:0] ])) begin
+                // Efficiency: Check if warp has TX IDs available if it's about to do a memory op
+                // This prevents it from being selected only to stall the whole pipeline.
+                logic [63:0] next_inst = prog_mem[w][ warp_pc[w][7:0] ];
+                opcode_t op = opcode_t'(next_inst[63:56]);
+                logic needs_tx_id = (op == OP_LDR || op == OP_STR);
+                logic tx_id_ok = !needs_tx_id || !tx_id_fifo_empty[w];
+
+                if (tx_id_ok && scoreboard_ok(int'(w), next_inst)) begin
                     issue_eligible_mask[w] = 1;
                 end
             end
@@ -552,7 +591,7 @@ module streaming_multiprocessor
     logic fsm_stall;
     logic mem_pool_full_stall;
     logic shared_mem_stall_cpu; // Stall signal from shared_memory serialization
-    assign stall_pipeline = fsm_stall || mem_pool_full_stall || 
+    assign stall_pipeline = fsm_stall || 
                            (oc_dispatch_valid[0] && !oc_dispatch_ready[0]) || 
                            (oc_dispatch_valid[1] && !oc_dispatch_ready[1]) || 
                            shared_mem_stall_cpu;
@@ -564,18 +603,7 @@ module streaming_multiprocessor
         end
     end
     
-    always_comb begin
-        mem_pool_full_stall = 0;
-        for (int w=0; w<NUM_WARPS; w++) begin
-            if (warp_state[w] == W_READY) begin
-                opcode_t op;
-                op = opcode_t'(prog_mem[w][ warp_pc[w][7:0] ][63:56]);
-                if ((op == OP_LDR || op == OP_STR) && tx_id_fifo_empty[w]) begin
-                    mem_pool_full_stall = 1;
-                end
-            end
-        end
-    end
+    // mem_pool_full_stall is now handled per-warp in issue_eligible_mask
 
     // Scheduler temporary variables (moved outside procedural block for synthesis)
     logic sched_found;
@@ -633,6 +661,10 @@ module streaming_multiprocessor
                             selected_warp = w;
                             warp_found = 1;
                             break;
+                        end else if (warp_state[w] == W_READY && cycle % 1000 == 0) begin
+                             $display("CORE [%0t] SCHED_BLOCKED: Warp %0d Eligible=%b OC_Ready=%b", 
+                                      $time, w, issue_eligible_mask[w], oc_dispatch_ready[0]);
+                             scoreboard_diag(int'(w), prog_mem[w][ warp_pc[w][7:0] ]);
                         end
                     end
                     
@@ -755,6 +787,8 @@ module streaming_multiprocessor
                             // Check for Branch Flush (Shadow Instruction)
                             if (!(branch_taken_q && branch_warp_q == if_id[p].warp)) begin
                                 next_sb[if_id[p].warp][ 6'(if_id[p].inst[55:48]) ] = 1;
+                                if ((if_id[p].warp == 4 && 6'(if_id[p].inst[55:48]) == 1) || (if_id[p].warp == 6 && 6'(if_id[p].inst[55:48]) == 14))
+                                    $display("CORE [%0t] SB_TRACE SET: Warp %0d Reg %0d at PC %h", $time, if_id[p].warp, 6'(if_id[p].inst[55:48]), if_id[p].pc);
                                 $display("CORE [%0t] SB SET:   Warp=%0d Reg=%d PC=%h", $time, if_id[p].warp, 6'(if_id[p].inst[55:48]), if_id[p].pc);
                             end
                         end
@@ -906,9 +940,13 @@ module streaming_multiprocessor
     assign lsu_inst_exec = lsu_valid_exec ? lsu_dout : '{op:OP_NOP, default:0};
     assign fpu_inst_exec = fpu_valid_exec ? fpu_dout : '{op:OP_NOP, default:0};
 
-    // Auto-Pop Logic: Pop from FIFOs when valid and pipeline is not stalled
-    assign alu_pop = alu_valid_exec && !stall_pipeline;
-    assign lsu_pop = lsu_valid_exec && !stall_pipeline;
+    // Auto-Pop Logic: Pop from FIFOs when valid
+    logic alu_can_commit;
+    assign alu_pop = alu_valid_exec && alu_can_commit;
+    
+    // LSU Pop logic: Only advance if the MEM stage can accept a new instruction
+    logic lsu_mem_consumed;
+    assign lsu_pop = lsu_valid_exec && (!lsu_mem.valid || lsu_mem_consumed);
 
     // FPU Pop logic with explicit backpressure from Writeback Arbiter
     logic stall_fpu_wb;
@@ -935,6 +973,7 @@ module streaming_multiprocessor
                     if (!lsu_full || lsu_pop) begin
                         lsu_push = 1; lsu_din = oc_ex_inst[0];
                         oc_ex_ready[0] = 1;
+                        // $display("CORE [%0t] ROUTER_P0: LSU Push Op=%s", $time, oc_ex_inst[0].op.name());
                     end
                 end
                 UNIT_FPU: begin
@@ -1293,7 +1332,8 @@ module streaming_multiprocessor
         end else begin
             alu_wb <= '{op:OP_NOP, valid:0, src:WB_ALU, warp:0, rd:0, mask:0, result:0, we:0, we_pred:0};
             
-            if (alu_valid_exec && !stall_pipeline) begin
+            if (alu_valid_exec) begin
+                // Process ALU instruction
                 $display("CORE [%0t] ALU EXEC: Warp=%0d PC=%h Op=%s Mask=%h Res0=%h Res16=%h", 
                     $time, alu_inst_exec.warp, alu_inst_exec.pc, alu_inst_exec.op.name(), exec_mask_alu, int_alu_out[0], int_alu_out[16]);
                 
@@ -1370,7 +1410,7 @@ module streaming_multiprocessor
                             if (!barrier_active) begin
                                 barrier_expected <= '0;
                                 for (int i = 0; i < NUM_WARPS; i++) begin
-                                    if (warp_state[i] == W_READY) barrier_expected[i] <= 1;
+                                    if (warp_state[i] == W_READY || warp_state[i] == W_BARRIER) barrier_expected[i] <= 1;
                                 end
                                 barrier_active <= 1;
                                 barrier_initialized <= 0;
@@ -1429,9 +1469,28 @@ module streaming_multiprocessor
             end
             
             // Update Tag on Branch Taken
-            if (cur_branch_taken && !stall_pipeline) begin
+            if (cur_branch_taken && alu_can_commit) begin
                 warp_branch_tag[cur_branch_warp] <= warp_branch_tag[cur_branch_warp] + 1;
             end
+        end
+    end
+
+    // ALU Commit Logic: Define when an executed instruction can actually retire
+    always_comb begin
+        alu_can_commit = 1;
+        if (alu_valid_exec && (alu_inst_exec.branch_tag == warp_branch_tag[alu_inst_exec.warp])) begin
+            case (alu_inst_exec.op)
+                OP_BAR, OP_EXIT: begin
+                    int w = int'(alu_inst_exec.warp);
+                    logic lsu_pipeline_busy;
+                    lsu_pipeline_busy = (mshr_count[w] != 0) || 
+                                       (lsu_valid_exec && lsu_inst_exec.warp == alu_inst_exec.warp) ||
+                                       (lsu_mem.valid && lsu_mem.warp == alu_inst_exec.warp);
+                    if (lsu_pipeline_busy)
+                        alu_can_commit = 0;
+                end
+                default: alu_can_commit = 1;
+            endcase
         end
     end
 
@@ -1508,11 +1567,12 @@ module streaming_multiprocessor
         if (!rst_n) begin
             lsu_mem <= '{op:OP_NOP, valid:0, warp:0, rd:0, mask:0, addresses:0, store_data:0, default:0};
         end else begin
-            // Normal pipeline advance - replay queue handles split continuations
-            lsu_mem <= '{op:OP_NOP, valid:0, warp:0, rd:0, mask:0, addresses:0, store_data:0, default:0};
+            if (lsu_mem_consumed || !lsu_mem.valid) begin
+                // Load Next from FIFO or clear
+                lsu_mem <= '{op:OP_NOP, valid:0, warp:0, rd:0, mask:0, addresses:0, store_data:0, default:0};
                 
                 if (lsu_valid_exec) begin
-                    if (lsu_inst_exec.branch_tag != warp_branch_tag[lsu_inst_exec.warp]) begin
+                    if (lsu_inst_exec.branch_tag != warp_branch_tag[lsu_inst_exec.warp]) begin 
                         // SQUASHED: Emit "Shadow NOP" to clear scoreboard in WB stage
                         lsu_mem <= '{
                             op: OP_NOP,
@@ -1539,6 +1599,7 @@ module streaming_multiprocessor
                         end
                     end
                 end
+            end
         end
     end
     
@@ -1644,7 +1705,8 @@ module streaming_multiprocessor
         replay_granted_warp = replay_rr_ptr;
         
         for (int i=0; i<NUM_WARPS; i++) begin
-            int candidate = (replay_rr_ptr + i) % NUM_WARPS;
+            logic [WARP_ID_WIDTH-1:0] candidate;
+            candidate = WARP_ID_WIDTH'( (32'(replay_rr_ptr) + 32'(i)) % 32'(NUM_WARPS) );
             if (replay_valid[candidate]) begin
                 replay_grant_valid = 1;
                 replay_granted_warp = candidate;
@@ -2036,6 +2098,11 @@ module streaming_multiprocessor
         end
     end
 
+    // Consumption logic for stallable LSU pipeline
+    assign lsu_mem_consumed = (lsu_mem.valid && lsu_mem.op == OP_NOP) || // Squash consumed in 1 cycle
+                              (lsu_mem.valid && (lsu_mem.op == OP_LDS || lsu_mem.op == OP_STS) && !shared_mem_stall_cpu) || // Shared consumed if no stall
+                              (!current_is_replay && mem_request_valid); // New global request consumed if issued
+
     // ------------------------------------------------------------------------
     // LSU/MEM EXECUTION STAGE (Sequential)
     // ------------------------------------------------------------------------
@@ -2118,20 +2185,24 @@ module streaming_multiprocessor
         // -----------------------
         for (int w=0; w<NUM_WARPS; w++) begin
             int next_cnt;
-            next_cnt = mshr_count[w];
+            logic [WARP_ID_WIDTH-1:0] cur_w;
+            cur_w = WARP_ID_WIDTH'(w);
+            next_cnt = mshr_count[cur_w];
             
-            // Increment if Allocating
-            if (mem_launch && !stall_pipeline && lsu_mem.warp == WARP_ID_WIDTH'(w))
+            // Increment if Allocating (Correctly identify the issued warp)
+            // MUST NOT be gated by stall_pipeline because the launch to mock memory is NOT gated.
+            if (mem_launch && current_lsu_request.warp == cur_w)
                 next_cnt++;
                 
             // Decrement if Reclaiming
-            if (l1_resp_valid && mock_resp_warp == WARP_ID_WIDTH'(w) && mshr_count[w] > 0) begin
-                int q_idx = int'(mock_resp_transaction_id[SLOT_ID_WIDTH-1:0]);
-                if (mshr_valid[w][q_idx] && mshr_table[w][q_idx].transaction_id == mock_resp_transaction_id)
+            if (l1_resp_valid && mock_resp_warp == cur_w && mshr_count[cur_w] > 0) begin
+                logic [SLOT_ID_WIDTH-1:0] q_idx;
+                q_idx = mock_resp_transaction_id[SLOT_ID_WIDTH-1:0];
+                if (mshr_valid[cur_w][q_idx] && mshr_table[cur_w][q_idx].transaction_id == mock_resp_transaction_id)
                     next_cnt--;
             end
                 
-            mshr_count[w] <= next_cnt;
+            mshr_count[cur_w] <= next_cnt;
         end
         
         // -----------------------
@@ -2361,7 +2432,7 @@ module streaming_multiprocessor
         state_req_ready   = '0;
 
         // ALU EX Stage: EXIT (Waits for MSHR Drain for Consistency)
-        if (alu_valid_exec && !stall_pipeline && (alu_inst_exec.branch_tag == warp_branch_tag[alu_inst_exec.warp])) begin
+        if (alu_valid_exec && alu_can_commit && (alu_inst_exec.branch_tag == warp_branch_tag[alu_inst_exec.warp])) begin
             if (alu_inst_exec.op == OP_EXIT) begin
                 // Ensure all pending memory transactions (Shared/Global) are complete
                 // AND written back (cover pipeline latency MSHR -> WB)
@@ -2381,7 +2452,7 @@ module streaming_multiprocessor
         end
 
         // ALU EX Stage: BAR Arrival (Waits for MSHR Drain for Consistency)
-        if (alu_valid_exec && !stall_pipeline && (alu_inst_exec.branch_tag == warp_branch_tag[alu_inst_exec.warp])) begin
+        if (alu_valid_exec && alu_can_commit && (alu_inst_exec.branch_tag == warp_branch_tag[alu_inst_exec.warp])) begin
             if (alu_inst_exec.op == OP_BAR) begin
                 // Memory Consistency: Ensure all previous loads have retired
                 if (mshr_count[alu_inst_exec.warp] == 0) begin

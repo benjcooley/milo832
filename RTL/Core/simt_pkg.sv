@@ -198,6 +198,8 @@ package simt_pkg;
             
             OP_BRA, OP_BEQ, OP_BNE, OP_SSY, OP_JOIN, OP_BAR, OP_EXIT, OP_CALL, OP_RET: return UNIT_CTRL;
             
+            OP_MOV: return UNIT_ALU;
+
             default: return UNIT_ALU; // All others (ADD, SUB, BIT, ISETP, FSETP etc)
         endcase
     endfunction

@@ -612,6 +612,8 @@ The most sophisticated stress test for the core (`TB/TB_SV/test_parallel_torus.s
 
 <img width="512" height="512" alt="single_warp_torus" src="TB/frames/torus_rotation.gif" />
 
+**(Simulation Speed: 6.25 FPS)**
+
 ### 5.6 Benchmark: Multi-Warp Parallel Torus (512-Thread SIMT Saturation)
 
 The ultimate stress test for the SM (`TB/TB_SV/test_multi_warp_torus.sv`). Even though the work-load is same as the single-warp torus, this benchmark saturates the core by running **16 warps in parallel**, with each warp computing a different ring cross-section of the torus.
@@ -640,9 +642,13 @@ The ultimate stress test for the SM (`TB/TB_SV/test_multi_warp_torus.sv`). Even 
 
 <img width="512" height="512" alt="multi_warp_torus" src="TB/frames/multi_warp_torus_animation.gif" />
 
+**(Simulation Speed: 25.00 FPS)**
+
 ### 5.8 Throughput Analysis: Single vs. Multi-Warp Execution
 
 The architecture's ability to hide latency through multi-warp interleaving is vividly demonstrated by comparing the Single-Warp and 16-Warp Torus benchmarks. Both tests generate **identical geometry** (a 512-vertex Torus mesh), but the 16-Warp version achieves significantly higher throughput by filling stall cycles (memory/SFU latency) with instructions from other warps.
+
+This architectural efficiency translates directly to visual fluidity: the Single-Warp implementation struggles at **6.25 FPS**, while the Multi-Warp scheduler successfully hides latency to deliver a smooth **25.00 FPS**—a perfect **4.0x speedup** consistent with the theoretical throughput gain.
 
 | Metric                   | **Single-Warp** (`test_parallel_torus`) | **16-Warp** (`test_multi_warp_torus`) |
 | :----------------------- | :-------------------------------------- | :------------------------------------ |

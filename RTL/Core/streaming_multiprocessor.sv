@@ -141,6 +141,7 @@ module streaming_multiprocessor
     logic [1:0][WARP_SIZE-1:0][31:0]    oc_wb_result_q;
     logic [1:0]                         oc_wb_we_q;
     logic [1:0]                         oc_wb_we_pred_q;
+    logic [1:0]                         oc_wb_we_pred;  // Combinational predicate write enable
     
     
     logic [31:0]          stack_pc   [NUM_WARPS][DIVERGENCE_STACK_DEPTH];
@@ -375,6 +376,7 @@ module streaming_multiprocessor
         oc_wb_rd    = '0;
         oc_wb_mask  = '0;
         oc_wb_data  = '0;
+        oc_wb_we_pred = '0;  // Initialize predicate write enable
         fpu_wb_served = 0;
 
         // Port 0: Priority ALU -> FPU
@@ -385,12 +387,14 @@ module streaming_multiprocessor
             oc_wb_rd[0]    = alu_wb.rd[REG_ADDR_WIDTH-1:0];
             oc_wb_mask[0]  = alu_wb.we ? alu_wb.mask : '0; 
             oc_wb_data[0]  = alu_wb.result;
+            oc_wb_we_pred[0] = alu_wb.we_pred;  // Propagate predicate write enable
         end else if (fpu_wb.valid) begin
             oc_wb_valid[0] = 1;
             oc_wb_warp[0]  = fpu_wb.warp;
             oc_wb_rd[0]    = fpu_wb.rd[REG_ADDR_WIDTH-1:0];
             oc_wb_mask[0]  = fpu_wb.we ? fpu_wb.mask : '0;
             oc_wb_data[0]  = fpu_wb.result;
+            oc_wb_we_pred[0] = fpu_wb.we_pred;  // Propagate predicate write enable
             fpu_wb_served  = 1;
         end
 
@@ -401,12 +405,14 @@ module streaming_multiprocessor
              oc_wb_rd[1]    = mem_resp_wb.rd[REG_ADDR_WIDTH-1:0];
              oc_wb_mask[1]  = mem_resp_wb.we ? mem_resp_wb.mask : '0;
              oc_wb_data[1]  = mem_resp_wb.result;
+             oc_wb_we_pred[1] = mem_resp_wb.we_pred;  // Propagate predicate write enable
         end else if (fpu_wb.valid && !fpu_wb_served) begin
              oc_wb_valid[1] = 1;
              oc_wb_warp[1]  = fpu_wb.warp;
              oc_wb_rd[1]    = fpu_wb.rd[REG_ADDR_WIDTH-1:0];
              oc_wb_mask[1]  = fpu_wb.we ? fpu_wb.mask : '0;
              oc_wb_data[1]  = fpu_wb.result;
+             oc_wb_we_pred[1] = fpu_wb.we_pred;  // Propagate predicate write enable
              fpu_wb_served  = 1;
         end
     end
@@ -822,12 +828,13 @@ module streaming_multiprocessor
             end
             
             // Apply Predicate Updates (From Sync WB or Async MEM_RESP)
-            if (oc_wb_valid[0] && oc_wb_we_pred_q[0]) begin
+            // Use registered valid signal to match other registered data signals
+            if (oc_wb_valid_q[0] && oc_wb_we_pred_q[0]) begin
                  for (int l=0; l<WARP_SIZE; l++) begin
                      if (oc_wb_mask_q[0][l]) preds[oc_wb_warp_q[0]][l][oc_wb_rd_q[0][2:0]] <= oc_wb_result_q[0][l][0];
                  end
             end
-            if (oc_wb_valid[1] && oc_wb_we_pred_q[1]) begin
+            if (oc_wb_valid_q[1] && oc_wb_we_pred_q[1]) begin
                  for (int l=0; l<WARP_SIZE; l++) begin
                      if (oc_wb_mask_q[1][l]) preds[oc_wb_warp_q[1]][l][oc_wb_rd_q[1][2:0]] <= oc_wb_result_q[1][l][0];
                  end
@@ -2367,7 +2374,7 @@ module streaming_multiprocessor
                 oc_wb_mask_q[k]    <= oc_wb_mask[k];
                 oc_wb_result_q[k]  <= oc_wb_data[k];
                 oc_wb_we_q[k]      <= 1'b1; // Default - data carries actual mask
-                // Special case for we_pred if needed, currently results carry mask
+                oc_wb_we_pred_q[k] <= oc_wb_we_pred[k]; // Propagate predicate write enable
             end
         end
     end

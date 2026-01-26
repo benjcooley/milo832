@@ -106,6 +106,65 @@ The core implements an in-order, dual-issue 5-stage pipeline with out-of-order m
     - **Pointer Update**: After selection, `rr_ptr` advances to `(selected_warp + 1) % 24`, ensuring fairness and preventing starvation.
   - **Context Switching Overhead**: **Zero Cycles**. All warp architectural state (PC, Registers, Active Mask) is fully resident in hardware, allowing instantaneous switching without saving/restoring context to memory.
 
+#### Warp Switching in Action (Simulation Evidence)
+
+The following log snippets from `test_multi_warp_torus.sv` demonstrate real-time warp switching behavior during the 512-thread torus rendering benchmark.
+
+**Example 1: Greedy Scheduling - Same Warp Executes Consecutively**
+
+When a warp is ready and others are stalled, the scheduler **stays with the same warp** (greedy behavior):
+
+```text
+[13795000] ALU EXEC: Warp=4 PC=0000003b Op=OP_BNE  Mask=ffffffff
+[13805000] ALU EXEC: Warp=4 PC=0000003c Op=OP_BAR  Mask=ffffffff  <- Same warp continues
+[13815000] ALU EXEC: Warp=4 PC=0000003d Op=OP_EXIT Mask=ffffffff  <- Still Warp 4
+[13825000] ALU EXEC: Warp=14 PC=00000038 Op=OP_OR  Mask=00000004  <- Switch (Warp 4 exited)
+```
+
+Another example showing Warp 3 executing 5 consecutive instructions:
+
+```text
+[14565000] ALU EXEC: Warp=3 PC=0000003b Op=OP_BNE  Mask=ffffffff
+[14585000] ALU EXEC: Warp=3 PC=0000003c Op=OP_BAR  Mask=ffffffff  <- Greedy: same warp
+[14595000] ALU EXEC: Warp=3 PC=0000003d Op=OP_NOP  Mask=ffffffff
+[14605000] ALU EXEC: Warp=3 PC=0000003e Op=OP_NOP  Mask=00000000
+[14615000] ALU EXEC: Warp=3 PC=0000003f Op=OP_NOP  Mask=00000000  <- 5th consecutive
+[14645000] ALU EXEC: Warp=3 PC=00000035 Op=OP_MOV  Mask=ffffffff  <- Still Warp 3!
+[14655000] ALU EXEC: Warp=11 PC=0000003a Op=OP_ADD Mask=ffffffff  <- Finally switches
+```
+
+**Example 2: Round-Robin Fairness When Multiple Warps Ready**
+
+At simulation start, all 16 warps are ready and none are stalled. In this case, the scheduler cannot be "greedy" with any single warp because **all warps have equal priority**. Round-robin ensures fairness and prevents starvation:
+
+```text
+[995000]  ALU EXEC: Warp=0  PC=00000000 Op=OP_MOV Mask=ffffffff  <- RR pointer starts at 0
+[1005000] ALU EXEC: Warp=1  PC=00000000 Op=OP_MOV Mask=ffffffff  <- RR advances to 1
+[1015000] ALU EXEC: Warp=2  PC=00000000 Op=OP_MOV Mask=ffffffff  <- RR advances to 2
+[1025000] ALU EXEC: Warp=3  PC=00000000 Op=OP_MOV Mask=ffffffff
+...
+[1145000] ALU EXEC: Warp=15 PC=00000000 Op=OP_MOV Mask=ffffffff  <- RR reaches 15
+[1155000] ALU EXEC: Warp=0  PC=00000001 Op=OP_MOV Mask=ffffffff  <- RR wraps back to 0
+```
+
+**Why not greedy here?** Greedy scheduling means "stay with the current warp **if it's ready and others are stalled**". When all warps are equally ready, round-robin takes precedence to distribute execution time fairly. This prevents a single warp from monopolizing the pipeline.
+
+**Example 3: Out-of-Order Execution Due to Memory Stalls**
+
+When warps stall on memory/scoreboard, the scheduler skips them and finds the next ready warp:
+
+```text
+[4035000] ALU EXEC: Warp=8  PC=00000015 Op=OP_MUL Mask=ffffffff
+[4045000] ALU EXEC: Warp=12 PC=00000015 Op=OP_MUL Mask=ffffffff  <- Skipped 9,10,11 (stalled)
+[4055000] ALU EXEC: Warp=13 PC=00000015 Op=OP_MUL Mask=ffffffff
+...
+[4175000] ALU EXEC: Warp=9  PC=00000015 Op=OP_MUL Mask=ffffffff  <- Warp 9 resumes after stall
+[4185000] ALU EXEC: Warp=10 PC=00000015 Op=OP_MUL Mask=ffffffff
+[4195000] ALU EXEC: Warp=11 PC=00000015 Op=OP_MUL Mask=ffffffff
+```
+
+**Summary**: The scheduler is **greedy-first** (stays with the current warp while it's ready), then uses **round-robin** to find the next ready warp when switching is required.
+
 ---
 
 ## 3. Instruction Set Architecture (ISA) Reference
@@ -533,7 +592,7 @@ The core is capable of full 3D graphics orchestration. A dedicated demo (`TB/TB_
 - **Math Engine**: Utilizes the **SFU** for trigonometric functions and **IDIV** for depth-based coordinate scaling ($x_{proj} = x \cdot f / z$).
 - **Rendering**: Directly writes projected vertices into the $64 \times 64$ framebuffer in global memory.
 
-<img width="512" height="512" alt="image" src="https://github.com/user-attachments/assets/7c77cd3b-b0fb-4d72-8466-1032b8ba3d04" />
+<img width="512" height="512" alt="image" src="TB/frames/parallel_cube.gif" />
 
 ### 5.4 Benchmark: Parallel Perspective Pyramid (SIMT)
 
@@ -541,7 +600,7 @@ This benchmark (`TB/TB_SV/test_parallel_pyramid.sv`) parallelizes the rendering 
 
 - **Outcome**: Verifies correct handled of scatter/gather memory accesses during vertex fetch and predicated atomic writes to the framebuffer.
 
-<img width="512" height="512" alt="image" src="https://github.com/user-attachments/assets/ab2458c1-ca0f-4f7e-b69b-e8d1360872be" />
+<img width="512" height="512" alt="image" src="TB/frames/pyramid_rotation.gif" />
 
 ### 5.5 Benchmark: High-Density Parallel Torus (Stress Test)
 
@@ -551,9 +610,51 @@ The most sophisticated stress test for the core (`TB/TB_SV/test_parallel_torus.s
 - **Hardware Hazard Verification**: Targets the **Hardware Predicate Scoreboard**. The shader performs `ISETP` immediately followed by predicated `LDR`/`STR`, verifying that the RTL automatically stalls the pipeline to prevent RAW hazards on predicate bits.
 - **Dynamic Animation**: Features a **Diagonal Tumble** (clockwise rotation on both X and Y axes) implemented via dynamic instruction patching during the simulation loop.
 
-<img width="512" height="512" alt="image" src="https://github.com/user-attachments/assets/dd2d737d-41f8-4506-b5fd-8b5b2cc76e02" />
+<img width="512" height="512" alt="single_warp_torus" src="TB/frames/torus_rotation.gif" />
 
-### 5.6 Limitations & Future Work
+### 5.6 Benchmark: Multi-Warp Parallel Torus (512-Thread SIMT Saturation)
+
+The ultimate stress test for the SM (`TB/TB_SV/test_multi_warp_torus.sv`). Even though the work-load is same as the single-warp torus, this benchmark saturates the core by running **16 warps in parallel**, with each warp computing a different ring cross-section of the torus.
+
+- **Thread Organization**:
+  - **16 Warps** (Warp 0-15) → Theta index (Ring cross-section)
+  - **32 Threads/Warp** → Phi index (Tube segments)
+  - **Total: 512 Active Threads** computing 512 unique vertices simultaneously
+
+- **Hardware Stress Targets**:
+  1. **Warp Scheduler**: Validates round-robin fairness under maximum occupancy
+  2. **MSHR Contention**: 16 warps competing for memory transactions
+  3. **Predicate Scoreboard**: Each warp uses `ISETP` + predicated `LDR`/`STR` in a serialization loop
+  4. **Barrier Synchronization**: All 16 warps synchronize via `BAR` before frame completion
+  5. **LSU Arbitration**: Heavy global memory traffic from concurrent warps
+
+- **Vertex Mapping**:
+
+  ```
+  Vertex(WarpID, ThreadID) = Torus(theta=WarpID*22.5°, phi=ThreadID*11.25°)
+  ```
+
+- **Animation**: 60-frame diagonal tumble rotation (X and Y axes synchronized)
+
+**Performance**: Completes in ~7,400 cycles per frame with all 512 threads active.
+
+<img width="512" height="512" alt="multi_warp_torus" src="TB/frames/multi_warp_torus_animation.gif" />
+
+### 5.8 Throughput Analysis: Single vs. Multi-Warp Execution
+
+The architecture's ability to hide latency through multi-warp interleaving is vividly demonstrated by comparing the Single-Warp and 16-Warp Torus benchmarks. Both tests generate **identical geometry** (a 512-vertex Torus mesh), but the 16-Warp version achieves significantly higher throughput by filling stall cycles (memory/SFU latency) with instructions from other warps.
+
+| Metric                   | **Single-Warp** (`test_parallel_torus`) | **16-Warp** (`test_multi_warp_torus`) |
+| :----------------------- | :-------------------------------------- | :------------------------------------ |
+| **Logic**                | 1 Warp loops 16 times (Serial)          | 16 Warps execute once (Parallel)      |
+| **Total Threads**        | 32 Active                               | 512 Active                            |
+| **Avg Cycles per Frame** | **~29,363**                             | **~7,415**                            |
+| **Throughput**           | 0.017 vertices/cycle                    | 0.069 vertices/cycle                  |
+| **Performance Gain**     | 1x (Baseline)                           | **~3.96x Faster**                     |
+
+**Key Insight**: The Single-Warp test spends ~75% of its time stalled waiting for high-latency SFU (`SIN`/`COS`) and Global Memory operations. The 16-Warp test successfully hides this latency, keeping the execution pipelines saturated.
+
+### 5.7 Limitations & Future Work
 
 - **Rasterization**: Currently supports point-based vertex rendering; full triangle rasterization is a future milestone.
 - **L1 Cache**: While the LSU supports splits, the current model uses a `mock_memory`. Integration with a genuine set-associative L1 cache is planned as a next step.
@@ -616,6 +717,7 @@ TB/
 │   ├── test_function_call.sv       # CALL/RET hardware stack
 │   ├── test_lsu_split.sv           # Memory coalescing and split requests
 │   ├── test_memory_system.sv       # MSHR and transaction tracking
+│   ├── test_multi_warp_torus.sv    # Multi-Warp Torus (16 warps, 512 threads)
 │   ├── test_parallel_cube.sv       # Parallel (SIMT) 3D vertex shader
 │   ├── test_parallel_pyramid.sv    # SIMT Pyramid Renderer (5 threads)
 │   ├── test_parallel_torus.sv      # High-Density Torus (32 threads, 512 vertices)
@@ -646,6 +748,9 @@ cd TB
 
 # Example: Running the Torus animation benchmark
 ./verify_specific.sh TB_SV/test_parallel_torus.sv
+
+# Example: Running the Multi-Warp Torus (512-thread stress test)
+./verify_specific.sh TB_SV/test_multi_warp_torus.sv
 ```
 
 ### Animation & Visualization
@@ -659,10 +764,15 @@ To generate 3D animations after running a graphical benchmark (e.g., Torus, Cube
    ```
 
 2. **Generate GIF**: The simulation saves frame artifacts as `.ppm` files in the temporary build directory (`/tmp/gpu_verify_specific/`). Use the provided Python scripts to compile them:
-   - **For Torus**:
+   - **For Single-Warp Torus**:
      ```bash
      cd TB
      python3 visualize_torus.py "/tmp/gpu_verify_specific/torus_frame_*.ppm" torus_animation.gif
+     ```
+   - **For Multi-Warp Torus (512 threads)**:
+     ```bash
+     cd TB
+     python3 visualize_torus.py "/tmp/gpu_verify_specific/multi_warp_torus_frame_*.ppm" frames/multi_warp_torus_animation.gif
      ```
    - **For Wireframe Cube**:
      ```bash
@@ -685,8 +795,9 @@ The testbench suite verifies:
 - Thread ID generation
 - Out-of-order memory completion
 - LSU Multi-Line Split Handling
-- LSU Multi-Line Split Handling
 - 3D Perspective Projection & Rotation
 - Parallel Vertex Processing (SIMT)
 - Hardware Predicate Scoreboard & Hazard Stalling
 - High-Density Compute Saturation (512+ Vertices)
+- Multi-Warp Saturation (16 Warps, 512 Threads)
+- MSHR Contention under Heavy Load

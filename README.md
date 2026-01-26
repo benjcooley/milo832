@@ -673,6 +673,8 @@ The graph above visualizes the cycle-by-cycle activity of the functional units o
 - **Rasterization**: Currently supports point-based vertex rendering; full triangle rasterization is a future milestone.
 - **L1 Cache**: While the LSU supports splits, the current model uses a `mock_memory`. Integration with a genuine set-associative L1 cache is planned as a next step.
 
+![Future Work](RTL/Docs/future_architecture_concept.png)
+
 ---
 
 ## 6. RTL Design Hierarchy

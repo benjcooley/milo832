@@ -1,0 +1,33 @@
+<svg width="600" height="400" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background -->
+    <rect width="100%" height="100%" fill="#1e1e1e"/>
+    
+    <!-- Title -->
+    <text x="300.0" y="30" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff" text-anchor="middle">IPC Scaling: Single vs Multi-Warp Execution</text>
+    
+    <!-- Y-Axis Grid & Labels -->
+    <line x1="60" y1="340.0" x2="540" y2="340.0" stroke="#444444" stroke-width="1" stroke-dasharray="4"/><text x="50" y="344.0" font-family="Arial, sans-serif" font-size="12" fill="#aaaaaa" text-anchor="end">0.0</text><line x1="60" y1="276.3636363636364" x2="540" y2="276.3636363636364" stroke="#444444" stroke-width="1" stroke-dasharray="4"/><text x="50" y="280.3636363636364" font-family="Arial, sans-serif" font-size="12" fill="#aaaaaa" text-anchor="end">0.5</text><line x1="60" y1="212.72727272727275" x2="540" y2="212.72727272727275" stroke="#444444" stroke-width="1" stroke-dasharray="4"/><text x="50" y="216.72727272727275" font-family="Arial, sans-serif" font-size="12" fill="#aaaaaa" text-anchor="end">1.0</text><line x1="60" y1="149.0909090909091" x2="540" y2="149.0909090909091" stroke="#444444" stroke-width="1" stroke-dasharray="4"/><text x="50" y="153.0909090909091" font-family="Arial, sans-serif" font-size="12" fill="#aaaaaa" text-anchor="end">1.5</text><line x1="60" y1="85.45454545454547" x2="540" y2="85.45454545454547" stroke="#444444" stroke-width="1" stroke-dasharray="4"/><text x="50" y="89.45454545454547" font-family="Arial, sans-serif" font-size="12" fill="#aaaaaa" text-anchor="end">2.0</text>
+    <!-- Axes -->
+    <line x1="60" y1="340" x2="540" y2="340" stroke="#aaaaaa" stroke-width="2"/>
+    <line x1="60" y1="60" x2="60" y2="340" stroke="#aaaaaa" stroke-width="2"/>
+    
+    <!-- Label Y -->
+    <text x="20" y="200.0" transform="rotate(-90, 20, 200.0)" font-family="Arial, sans-serif" font-size="12" fill="#aaaaaa" text-anchor="middle">Instructions Per Cycle (IPC)</text>
+    
+    <!-- Bars -->
+    <rect x="140" y="235.63636363636365" width="100" height="104.36363636363635" fill="#00d2ff" rx="4" ry="4"/>
+    <rect x="340" y="155.45454545454547" width="100" height="184.54545454545453" fill="#00ff9d" rx="4" ry="4"/>
+    
+    <!-- Values on Bars -->
+    <text x="190.0" y="225.63636363636365" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">0.82</text>
+    <text x="390.0" y="145.45454545454547" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">1.45</text>
+    
+    <!-- X Labels -->
+    <text x="190.0" y="360" font-family="Arial, sans-serif" font-size="12" fill="#ffffff" text-anchor="middle">Single Warp (1)</text>
+    <text x="390.0" y="360" font-family="Arial, sans-serif" font-size="12" fill="#ffffff" text-anchor="middle">Multi-Warp (16)</text>
+    
+    <!-- Peak Line -->
+    <line x1="60" y1="85.45454545454547" x2="540" y2="85.45454545454547" stroke="#ff0055" stroke-width="2" stroke-dasharray="8,4"/>
+    <text x="540" y="80.45454545454547" font-family="Arial, sans-serif" font-size="11" fill="#ff0055" text-anchor="end" font-weight="bold">Dual-Issue Peak (2.0)</text>
+    
+    </svg>

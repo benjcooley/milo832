@@ -610,7 +610,7 @@ The most sophisticated stress test for the core (`TB/TB_SV/test_parallel_torus.s
 - **Hardware Hazard Verification**: Targets the **Hardware Predicate Scoreboard**. The shader performs `ISETP` immediately followed by predicated `LDR`/`STR`, verifying that the RTL automatically stalls the pipeline to prevent RAW hazards on predicate bits.
 - **Dynamic Animation**: Features a **Diagonal Tumble** (clockwise rotation on both X and Y axes) implemented via dynamic instruction patching during the simulation loop.
 
-<img width="512" height="512" alt="single_warp_torus" src="TB/frames/torus_rotation.gif" />
+<img width="512" height="512" alt="single_warp_torus" src="torus_rotation_1_wrap.gif" />
 
 **(Simulation Speed: 6.25 FPS)**
 

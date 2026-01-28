@@ -2,12 +2,12 @@
 -- operand_collector.vhd
 -- 16 Unit Shared Pool Operand Collector (Fermi Model)
 --
--- Based on SIMT-GPU-Core by Aritra Manna
--- Original: https://github.com/aritramanna/SIMT-GPU-Core
--- Translated to VHDL for Milo832 GPU project
+-- VHDL translation of SIMT-GPU-Core by Aritra Manna
+-- Original SystemVerilog: https://github.com/aritramanna/SIMT-GPU-Core
 --
 -- Many thanks to Aritra Manna for creating and open-sourcing the excellent
--- SIMT-GPU-Core project, which served as the foundation for this implementation.
+-- SIMT-GPU-Core project. This file is a VHDL translation of the original
+-- SystemVerilog implementation.
 --
 -- Features:
 -- 1. Dual Writeback Ports for ALU and Memory completions

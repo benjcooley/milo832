@@ -4,7 +4,7 @@ Milo832 is a tile-based rasterizing GPU implemented in VHDL, designed to run on 
 
 ## Acknowledgments
 
-The SIMT shader core in this project is based on the excellent **SIMT-GPU-Core** by **Aritra Manna**. Many thanks to Aritra for creating and open-sourcing this educational GPU implementation, which provided a solid foundation for our programmable shader architecture.
+The SIMT shader core in this project is a VHDL translation of the **SIMT-GPU-Core** by **Aritra Manna**. Many thanks to Aritra for creating and open-sourcing this excellent educational GPU implementation. The original SystemVerilog code was translated to VHDL for use in this project.
 
 **Original Project:** [https://github.com/aritramanna/SIMT-GPU-Core](https://github.com/aritramanna/SIMT-GPU-Core)
 

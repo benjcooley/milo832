@@ -198,10 +198,8 @@ begin
                             frag_depth := to_integer(unsigned(frag_z));
                             
                             if idx >= 0 and idx < FB_WIDTH*FB_HEIGHT then
-                                if frag_depth > depth_buffer(idx) then
-                                    color_buffer(idx) := frag_color(31 downto 8);
-                                    depth_buffer(idx) := frag_depth;
-                                end if;
+                                -- No depth test - just write
+                                color_buffer(idx) := frag_color(31 downto 8);
                                 total_frags := total_frags + 1;
                             end if;
                         end if;
@@ -255,10 +253,10 @@ begin
         for frame in 0 to NUM_FRAMES-1 loop
             report "Frame " & integer'image(frame) severity note;
             
-            -- Clear buffers
+            -- Clear buffers (depth = far = large value)
             for i in 0 to FB_WIDTH*FB_HEIGHT-1 loop
                 color_buffer(i) := x"1A1A2E";
-                depth_buffer(i) := -1000000;
+                depth_buffer(i) := 1000000;
             end loop;
             
             -- Rotation
@@ -281,18 +279,18 @@ begin
                 proj_z := temp_y * sin_x + temp_z * cos_x;
                 temp_y := proj_y; temp_z := proj_z;
                 
-                temp_z := temp_z + 4.0;
+                temp_z := temp_z + 3.0;  -- Closer to camera
                 if temp_z > 0.1 then
-                    proj_x := temp_x * 50.0 / temp_z;
-                    proj_y := temp_y * 50.0 / temp_z;
+                    proj_x := temp_x * 80.0 / temp_z;  -- Larger projection
+                    proj_y := temp_y * 80.0 / temp_z;
                 else
-                    proj_x := temp_x * 500.0;
-                    proj_y := temp_y * 500.0;
+                    proj_x := temp_x * 800.0;
+                    proj_y := temp_y * 800.0;
                 end if;
                 
                 transformed(i).x := proj_x + real(FB_WIDTH/2);
                 transformed(i).y := proj_y + real(FB_HEIGHT/2);
-                transformed(i).z := temp_z * 100.0;
+                transformed(i).z := temp_z;  -- Keep Z small (2-5 range)
             end loop;
             
             -- Render faces
@@ -307,9 +305,10 @@ begin
                 sy2 := integer(transformed(CUBE_FACES(face)(2)).y);
                 sz2 := integer(transformed(CUBE_FACES(face)(2)).z);
                 
+                -- Signed area for backface culling (disabled for now - render all faces)
                 nz := real((sx1 - sx0) * (sy2 - sy0) - (sy1 - sy0) * (sx2 - sx0));
                 
-                if nz > 0.0 then
+                if true then  -- Render all faces, rely on draw order
                     render_triangle(sx0, sy0, sz0, sx1, sy1, sz1, sx2, sy2, sz2, FACE_COLORS(face));
                     
                     sx0 := integer(transformed(CUBE_FACES(face)(3)).x);

@@ -190,6 +190,7 @@ TESTS=(
     "rop"
     "tile_rasterizer"
     "gpu_core"
+    "texture_stress"
 )
 
 # Track results

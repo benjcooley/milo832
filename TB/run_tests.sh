@@ -191,6 +191,7 @@ TESTS=(
     "tile_rasterizer"
     "gpu_core"
     "texture_stress"
+    "render_scene"
 )
 
 # Track results

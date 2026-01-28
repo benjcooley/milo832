@@ -101,6 +101,7 @@ architecture rtl of rop is
     ---------------------------------------------------------------------------
     type state_t is (
         IDLE,
+        SETUP,          -- Compute fb_addr
         READ_DEPTH,
         WAIT_DEPTH,
         DEPTH_TEST,
@@ -211,6 +212,7 @@ begin
         variable src_factor_a, dst_factor_a : unsigned(7 downto 0);
         variable final_r, final_g, final_b, final_a : std_logic_vector(7 downto 0);
         variable dst_color : std_logic_vector(31 downto 0);
+        variable out_color : std_logic_vector(31 downto 0);
     begin
         if rst_n = '0' then
             state <= IDLE;
@@ -226,6 +228,14 @@ begin
             color_rd_addr <= (others => '0');
             color_wr_addr <= (others => '0');
             color_wr_data <= (others => '0');
+            
+            -- Initialize latched data and intermediate signals
+            lat_x <= (others => '0');
+            lat_y <= (others => '0');
+            lat_z <= (others => '0');
+            lat_color <= (others => '0');
+            fb_addr <= (others => '0');
+            blended_color <= (others => '0');
             
         elsif rising_edge(clk) then
             -- Default: deassert write valids
@@ -245,15 +255,21 @@ begin
                         -- Calculate framebuffer address
                         fb_addr <= resize(unsigned(frag_y) * FB_WIDTH + unsigned(frag_x), 32);
                         
-                        if depth_test_en = '1' then
-                            state <= READ_DEPTH;
+                        -- Go to SETUP to let fb_addr settle
+                        state <= SETUP;
+                    end if;
+                
+                ---------------------------------------------------------------
+                when SETUP =>
+                    -- fb_addr is now valid, proceed based on config
+                    if depth_test_en = '1' then
+                        state <= READ_DEPTH;
+                    else
+                        depth_pass <= '1';
+                        if blend_en = '1' then
+                            state <= READ_COLOR;
                         else
-                            depth_pass <= '1';
-                            if blend_en = '1' then
-                                state <= READ_COLOR;
-                            else
-                                state <= WRITE_OUTPUT;
-                            end if;
+                            state <= WRITE_OUTPUT;
                         end if;
                     end if;
                 
@@ -346,36 +362,40 @@ begin
                     color_wr_valid <= '1';
                     color_wr_addr <= std_logic_vector(fb_addr);
                     
+                    -- Build output color using variable (start with zeros)
+                    out_color := (others => '0');
+                    
                     if blend_en = '1' then
-                        -- Apply color mask
+                        -- Apply color mask to blended result
                         if color_mask(3) = '1' then
-                            color_wr_data(31 downto 24) <= blended_color(31 downto 24);
+                            out_color(31 downto 24) := blended_color(31 downto 24);
                         end if;
                         if color_mask(2) = '1' then
-                            color_wr_data(23 downto 16) <= blended_color(23 downto 16);
+                            out_color(23 downto 16) := blended_color(23 downto 16);
                         end if;
                         if color_mask(1) = '1' then
-                            color_wr_data(15 downto 8) <= blended_color(15 downto 8);
+                            out_color(15 downto 8) := blended_color(15 downto 8);
                         end if;
                         if color_mask(0) = '1' then
-                            color_wr_data(7 downto 0) <= blended_color(7 downto 0);
+                            out_color(7 downto 0) := blended_color(7 downto 0);
                         end if;
                     else
-                        -- No blending, direct color
+                        -- No blending, direct color with mask
                         if color_mask(3) = '1' then
-                            color_wr_data(31 downto 24) <= lat_color(31 downto 24);
+                            out_color(31 downto 24) := lat_color(31 downto 24);
                         end if;
                         if color_mask(2) = '1' then
-                            color_wr_data(23 downto 16) <= lat_color(23 downto 16);
+                            out_color(23 downto 16) := lat_color(23 downto 16);
                         end if;
                         if color_mask(1) = '1' then
-                            color_wr_data(15 downto 8) <= lat_color(15 downto 8);
+                            out_color(15 downto 8) := lat_color(15 downto 8);
                         end if;
                         if color_mask(0) = '1' then
-                            color_wr_data(7 downto 0) <= lat_color(7 downto 0);
+                            out_color(7 downto 0) := lat_color(7 downto 0);
                         end if;
                     end if;
                     
+                    color_wr_data <= out_color;
                     written_count <= written_count + 1;
                     state <= IDLE;
                     

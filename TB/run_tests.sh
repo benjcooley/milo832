@@ -92,33 +92,77 @@ run_test() {
 echo ""
 echo "Compiling RTL sources..."
 
+# Track compiled files to avoid duplicates
+COMPILED=""
+
+is_compiled() {
+    echo "$COMPILED" | grep -q ":$1:"
+}
+
+mark_compiled() {
+    COMPILED="$COMPILED:$1:"
+}
+
 # Core packages first
 compile_vhd "$RTL_DIR/core/simt_pkg.vhd" || exit 1
+mark_compiled "simt_pkg.vhd"
 
 # Compute packages
 if [ -f "$RTL_DIR/compute/sfu_pkg.vhd" ]; then
     compile_vhd "$RTL_DIR/compute/sfu_pkg.vhd"
+    mark_compiled "sfu_pkg.vhd"
 fi
 
 # Memory modules
 for f in "$RTL_DIR/memory/"*.vhd; do
-    [ -f "$f" ] && compile_vhd "$f"
+    fname=$(basename "$f")
+    if [ -f "$f" ] && ! is_compiled "$fname"; then
+        compile_vhd "$f"
+        mark_compiled "$fname"
+    fi
 done
 
 # Compute modules
 for f in "$RTL_DIR/compute/"*.vhd; do
-    [ -f "$f" ] && compile_vhd "$f"
+    fname=$(basename "$f")
+    if [ -f "$f" ] && ! is_compiled "$fname"; then
+        compile_vhd "$f"
+        mark_compiled "$fname"
+    fi
 done
 
-# Core modules
+# Core modules (skip already compiled packages)
 for f in "$RTL_DIR/core/"*.vhd; do
-    [ -f "$f" ] && compile_vhd "$f"
+    fname=$(basename "$f")
+    if [ -f "$f" ] && ! is_compiled "$fname"; then
+        compile_vhd "$f"
+        mark_compiled "$fname"
+    fi
 done
 
 # Graphics modules
 for f in "$RTL_DIR/graphics/"*.vhd; do
-    [ -f "$f" ] && compile_vhd "$f"
+    fname=$(basename "$f")
+    if [ -f "$f" ] && ! is_compiled "$fname"; then
+        compile_vhd "$f"
+        mark_compiled "$fname"
+    fi
 done
+
+# Bus modules (packages first)
+if [ -d "$RTL_DIR/bus" ]; then
+    if [ -f "$RTL_DIR/bus/system_bus_pkg.vhd" ]; then
+        compile_vhd "$RTL_DIR/bus/system_bus_pkg.vhd"
+        mark_compiled "system_bus_pkg.vhd"
+    fi
+    for f in "$RTL_DIR/bus/"*.vhd; do
+        fname=$(basename "$f")
+        if [ -f "$f" ] && ! is_compiled "$fname"; then
+            compile_vhd "$f"
+            mark_compiled "$fname"
+        fi
+    done
+fi
 
 # Compile testbenches
 echo ""

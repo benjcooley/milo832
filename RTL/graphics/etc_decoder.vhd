@@ -153,9 +153,9 @@ begin
                     dg := signed(block_rgb(50 downto 48));
                     db := signed(block_rgb(42 downto 40));
                     
-                    r2 := unsigned(signed('0' & r1) + resize(dr, 6))(4 downto 0);
-                    g2 := unsigned(signed('0' & g1) + resize(dg, 6))(4 downto 0);
-                    b2 := unsigned(signed('0' & b1) + resize(db, 6))(4 downto 0);
+                    r2 := resize(unsigned(resize(signed('0' & r1), 6) + resize(dr, 6)), 5);
+                    g2 := resize(unsigned(resize(signed('0' & g1), 6) + resize(dg, 6)), 5);
+                    b2 := resize(unsigned(resize(signed('0' & b1), 6) + resize(db, 6)), 5);
                     
                     -- Expand 5-bit to 8-bit
                     if in_subblock_1 = '0' then

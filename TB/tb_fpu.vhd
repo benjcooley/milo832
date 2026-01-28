@@ -9,6 +9,9 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use ieee.float_pkg.all;
 
+library work;
+use work.simt_pkg.all;
+
 entity tb_fpu is
 end entity tb_fpu;
 
@@ -20,7 +23,7 @@ architecture sim of tb_fpu is
     signal clk        : std_logic := '0';
     signal rst_n      : std_logic := '0';
     signal valid_in   : std_logic := '0';
-    signal op         : std_logic_vector(7 downto 0) := (others => '0');
+    signal op         : opcode_t := (others => '0');
     signal a, b, c    : std_logic_vector(31 downto 0) := (others => '0');
     signal valid_out  : std_logic;
     signal result     : std_logic_vector(31 downto 0);
@@ -30,13 +33,7 @@ architecture sim of tb_fpu is
     signal fail_count : integer := 0;
     signal sim_done   : boolean := false;
     
-    -- Opcodes
-    constant OP_FADD : std_logic_vector(7 downto 0) := x"10";
-    constant OP_FSUB : std_logic_vector(7 downto 0) := x"11";
-    constant OP_FMUL : std_logic_vector(7 downto 0) := x"12";
-    constant OP_FDIV : std_logic_vector(7 downto 0) := x"13";
-    constant OP_ITOF : std_logic_vector(7 downto 0) := x"17";
-    constant OP_FTOI : std_logic_vector(7 downto 0) := x"18";
+    -- Use opcodes from simt_pkg (OP_FADD, OP_FSUB, etc. are imported)
     
     -- IEEE-754 constants
     constant F_ZERO     : std_logic_vector(31 downto 0) := x"00000000";

@@ -188,6 +188,8 @@ begin
         variable result_sign : std_logic;
         variable result_exp : signed(9 downto 0);
         variable result_mant : unsigned(24 downto 0);
+        variable int_abs : unsigned(31 downto 0);  -- For ITOF conversion
+        variable lead_pos : integer;
     begin
         if rst_n = '0' then
             valid_p2 <= '0';
@@ -357,20 +359,28 @@ begin
                     else
                         if a(31) = '1' then
                             result_sign := '1';
-                            result_mant := resize(unsigned(-signed(a)), 25);
+                            int_abs := unsigned(-signed(a));
                         else
                             result_sign := '0';
-                            result_mant := resize(unsigned(a), 25);
+                            int_abs := unsigned(a);
                         end if;
                         
-                        -- Find leading one and normalize
-                        result_exp := to_signed(31, 10);
+                        -- Find leading one position
+                        lead_pos := 0;
                         for i in 31 downto 0 loop
-                            if result_mant(i) = '1' then
-                                result_exp := to_signed(i, 10);
+                            if int_abs(i) = '1' then
+                                lead_pos := i;
                                 exit;
                             end if;
                         end loop;
+                        result_exp := to_signed(lead_pos, 10);
+                        
+                        -- Normalize: shift mantissa so leading 1 is at bit 23
+                        if lead_pos >= 23 then
+                            result_mant := resize(shift_right(int_abs, lead_pos - 23), 25);
+                        else
+                            result_mant := resize(shift_left(int_abs, 23 - lead_pos), 25);
+                        end if;
                         
                         add_result <= encode_float(result_sign, result_exp, result_mant);
                     end if;

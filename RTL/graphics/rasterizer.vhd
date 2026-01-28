@@ -355,22 +355,22 @@ begin
                         w0_r := resize(unsigned(bary_w0(31 downto 16)) * unsigned(tri_v0_color(31 downto 24)), 16);
                         w1_r := resize(unsigned(bary_w1(31 downto 16)) * unsigned(tri_v1_color(31 downto 24)), 16);
                         w2_r := resize(unsigned(bary_w2(31 downto 16)) * unsigned(tri_v2_color(31 downto 24)), 16);
-                        color_r := (w0_r + w1_r + w2_r)(15 downto 8);
+                        color_r := resize(shift_right(w0_r + w1_r + w2_r, 8), 8);
                         
                         w0_g := resize(unsigned(bary_w0(31 downto 16)) * unsigned(tri_v0_color(23 downto 16)), 16);
                         w1_g := resize(unsigned(bary_w1(31 downto 16)) * unsigned(tri_v1_color(23 downto 16)), 16);
                         w2_g := resize(unsigned(bary_w2(31 downto 16)) * unsigned(tri_v2_color(23 downto 16)), 16);
-                        color_g := (w0_g + w1_g + w2_g)(15 downto 8);
+                        color_g := resize(shift_right(w0_g + w1_g + w2_g, 8), 8);
                         
                         w0_b := resize(unsigned(bary_w0(31 downto 16)) * unsigned(tri_v0_color(15 downto 8)), 16);
                         w1_b := resize(unsigned(bary_w1(31 downto 16)) * unsigned(tri_v1_color(15 downto 8)), 16);
                         w2_b := resize(unsigned(bary_w2(31 downto 16)) * unsigned(tri_v2_color(15 downto 8)), 16);
-                        color_b := (w0_b + w1_b + w2_b)(15 downto 8);
+                        color_b := resize(shift_right(w0_b + w1_b + w2_b, 8), 8);
                         
                         w0_a := resize(unsigned(bary_w0(31 downto 16)) * unsigned(tri_v0_color(7 downto 0)), 16);
                         w1_a := resize(unsigned(bary_w1(31 downto 16)) * unsigned(tri_v1_color(7 downto 0)), 16);
                         w2_a := resize(unsigned(bary_w2(31 downto 16)) * unsigned(tri_v2_color(7 downto 0)), 16);
-                        color_a := (w0_a + w1_a + w2_a)(15 downto 8);
+                        color_a := resize(shift_right(w0_a + w1_a + w2_a, 8), 8);
                         
                         interp_color <= std_logic_vector(color_r) & std_logic_vector(color_g) & 
                                        std_logic_vector(color_b) & std_logic_vector(color_a);

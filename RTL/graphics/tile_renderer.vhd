@@ -134,7 +134,7 @@ architecture rtl of tile_renderer is
         NEXT_TRIANGLE,      -- Move to next triangle in tile
         WRITE_TILE,         -- DMA tile to framebuffer
         NEXT_TILE,          -- Advance to next tile
-        FRAME_DONE
+        ST_FRAME_DONE
     );
     signal state : state_t := IDLE;
     
@@ -544,7 +544,7 @@ begin
                     if cur_tile_x = TILES_X - 1 then
                         cur_tile_x <= (others => '0');
                         if cur_tile_y = TILES_Y - 1 then
-                            state <= FRAME_DONE;
+                            state <= ST_FRAME_DONE;
                         else
                             cur_tile_y <= cur_tile_y + 1;
                             state <= START_TILE;
@@ -554,7 +554,7 @@ begin
                         state <= START_TILE;
                     end if;
                 
-                when FRAME_DONE =>
+                when ST_FRAME_DONE =>
                     frame_done <= '1';
                     state <= IDLE;
                     

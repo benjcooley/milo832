@@ -138,12 +138,12 @@ architecture rtl of rop is
     begin
         case func is
             when DEPTH_NEVER    => return '0';
-            when DEPTH_LESS     => return '1' when frag_z < buf_z else '0';
-            when DEPTH_EQUAL    => return '1' when frag_z = buf_z else '0';
-            when DEPTH_LEQUAL   => return '1' when frag_z <= buf_z else '0';
-            when DEPTH_GREATER  => return '1' when frag_z > buf_z else '0';
-            when DEPTH_NOTEQUAL => return '1' when frag_z /= buf_z else '0';
-            when DEPTH_GEQUAL   => return '1' when frag_z >= buf_z else '0';
+            when DEPTH_LESS     => if frag_z < buf_z then return '1'; else return '0'; end if;
+            when DEPTH_EQUAL    => if frag_z = buf_z then return '1'; else return '0'; end if;
+            when DEPTH_LEQUAL   => if frag_z <= buf_z then return '1'; else return '0'; end if;
+            when DEPTH_GREATER  => if frag_z > buf_z then return '1'; else return '0'; end if;
+            when DEPTH_NOTEQUAL => if frag_z /= buf_z then return '1'; else return '0'; end if;
+            when DEPTH_GEQUAL   => if frag_z >= buf_z then return '1'; else return '0'; end if;
             when DEPTH_ALWAYS   => return '1';
             when others         => return '1';
         end case;

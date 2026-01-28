@@ -131,9 +131,13 @@ for f in "$RTL_DIR/compute/"*.vhd; do
     fi
 done
 
-# Core modules (skip already compiled packages)
+# Core modules (skip already compiled packages, defer gpu_core.vhd)
 for f in "$RTL_DIR/core/"*.vhd; do
     fname=$(basename "$f")
+    # Skip gpu_core.vhd - it depends on graphics modules
+    if [ "$fname" = "gpu_core.vhd" ]; then
+        continue
+    fi
     if [ -f "$f" ] && ! is_compiled "$fname"; then
         compile_vhd "$f"
         mark_compiled "$fname"
@@ -148,6 +152,12 @@ for f in "$RTL_DIR/graphics/"*.vhd; do
         mark_compiled "$fname"
     fi
 done
+
+# Top-level modules that depend on both core and graphics
+if [ -f "$RTL_DIR/core/gpu_core.vhd" ] && ! is_compiled "gpu_core.vhd"; then
+    compile_vhd "$RTL_DIR/core/gpu_core.vhd"
+    mark_compiled "gpu_core.vhd"
+fi
 
 # Bus modules (packages first)
 if [ -d "$RTL_DIR/bus" ]; then
@@ -179,6 +189,7 @@ TESTS=(
     "shared_memory"
     "rop"
     "tile_rasterizer"
+    "gpu_core"
 )
 
 # Track results

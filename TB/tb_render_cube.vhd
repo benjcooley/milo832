@@ -305,10 +305,11 @@ begin
                 sy2 := integer(transformed(CUBE_FACES(face)(2)).y);
                 sz2 := integer(transformed(CUBE_FACES(face)(2)).z);
                 
-                -- Signed area for backface culling (disabled for now - render all faces)
+                -- Signed area for backface culling
+                -- Positive = CW winding in screen space = front-facing
                 nz := real((sx1 - sx0) * (sy2 - sy0) - (sy1 - sy0) * (sx2 - sx0));
                 
-                if true then  -- Render all faces, rely on draw order
+                if nz < 0.0 then  -- Only render front-facing triangles
                     render_triangle(sx0, sy0, sz0, sx1, sy1, sz1, sx2, sy2, sz2, FACE_COLORS(face));
                     
                     sx0 := integer(transformed(CUBE_FACES(face)(3)).x);

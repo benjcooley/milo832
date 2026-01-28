@@ -1,6 +1,7 @@
 MIT License
 
-Copyright (c) 2026 aritramanna
+Copyright (c) 2026 Benjamin Cooley
+Based on SIMT-GPU-Core, Copyright (c) 2026 Aritra Manna
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +20,20 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+ATTRIBUTION NOTICE:
+
+This project is derived from and inspired by the SIMT-GPU-Core project
+by Aritra Manna (https://github.com/aritramanna/SIMT-GPU-Core).
+
+The original SystemVerilog implementation has been translated to VHDL
+and extended with additional graphics pipeline components including:
+- Hardware rasterizer
+- Texture sampling unit
+- Raster operations pipeline (ROP)
+- Command processor for host CPU interface
+
+We gratefully acknowledge the original author's contribution to the
+open-source hardware community.

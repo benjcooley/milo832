@@ -1,6 +1,96 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.nfs*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+.project
+.settings/
+
+# Original SystemVerilog files (keeping VHDL only)
+*.sv
+*.v
+
+# Simulation outputs
 *.ppm
+*.png
+*.bmp
 *.log
 *.vpd
+*.vcd
+*.ghw
+*.cf
+
+# Build directories
 obj_dir/
+work/
+TB/work/
 /tmp/
-.DS_Store
+
+# GHDL build artifacts
+*.o
+e~*.o
+
+# GHDL executables (testbench binaries)
+tb_*
+!tb_*.vhd
+
+# Verilator
+*.a
+*.d
+
+# Vivado
+*.jou
+*.str
+*.xpr
+*.runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
+
+# Quartus
+*.qpf
+*.qsf
+db/
+incremental_db/
+output_files/
+*.sof
+*.pof
+
+# ModelSim / QuestaSim
+transcript
+vsim.wlf
+modelsim.ini
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+.eggs/
+venv/
+.venv/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup

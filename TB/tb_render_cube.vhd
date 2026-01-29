@@ -198,9 +198,12 @@ begin
                             frag_depth := to_integer(unsigned(frag_z));
                             
                             if idx >= 0 and idx < FB_WIDTH*FB_HEIGHT then
-                                -- No depth test - just write
-                                color_buffer(idx) := frag_color(31 downto 8);
-                                total_frags := total_frags + 1;
+                                -- Depth test: larger Z is closer in our convention
+                                if frag_depth > depth_buffer(idx) then
+                                    color_buffer(idx) := frag_color(31 downto 8);
+                                    depth_buffer(idx) := frag_depth;
+                                    total_frags := total_frags + 1;
+                                end if;
                             end if;
                         end if;
                     end loop;
@@ -256,7 +259,7 @@ begin
             -- Clear buffers (depth = far = large value)
             for i in 0 to FB_WIDTH*FB_HEIGHT-1 loop
                 color_buffer(i) := x"1A1A2E";
-                depth_buffer(i) := 1000000;
+                depth_buffer(i) := 0;  -- Near plane (larger Z = closer in our convention)
             end loop;
             
             -- Rotation
@@ -290,7 +293,7 @@ begin
                 
                 transformed(i).x := proj_x + real(FB_WIDTH/2);
                 transformed(i).y := proj_y + real(FB_HEIGHT/2);
-                transformed(i).z := temp_z;  -- Keep Z small (2-5 range)
+                transformed(i).z := temp_z * 10000.0;  -- Scale Z for depth precision (20000-50000 range)
             end loop;
             
             -- Render faces
@@ -309,7 +312,7 @@ begin
                 -- Positive = CW winding in screen space = front-facing
                 nz := real((sx1 - sx0) * (sy2 - sy0) - (sy1 - sy0) * (sx2 - sx0));
                 
-                if nz < 0.0 then  -- Only render front-facing triangles
+                if nz > 0.0 then  -- Only render front-facing triangles
                     render_triangle(sx0, sy0, sz0, sx1, sy1, sz1, sx2, sy2, sz2, FACE_COLORS(face));
                     
                     sx0 := integer(transformed(CUBE_FACES(face)(3)).x);

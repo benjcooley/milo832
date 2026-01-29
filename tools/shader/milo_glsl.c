@@ -1018,16 +1018,29 @@ static int gen_expr(milo_compiler_t *c, milo_node_t *node) {
                 for (int i = 0; i < c->symtab.count; i++) {
                     if (strcmp(c->symtab.symbols[i].name, name) == 0) {
                         int r = c->symtab.symbols[i].reg;
+                        int size = type_size(c->symtab.symbols[i].type);
+                        
                         if (node->assign.op == TOK_ASSIGN) {
-                            emit(c, "    mov r%d, r%d", r, val);
+                            /* Copy all components for vector types */
+                            for (int j = 0; j < size; j++) {
+                                emit(c, "    mov r%d, r%d", r + j, val + j);
+                            }
                         } else if (node->assign.op == TOK_PLUS_ASSIGN) {
-                            emit(c, "    fadd r%d, r%d, r%d", r, r, val);
+                            for (int j = 0; j < size; j++) {
+                                emit(c, "    fadd r%d, r%d, r%d", r + j, r + j, val + j);
+                            }
                         } else if (node->assign.op == TOK_MINUS_ASSIGN) {
-                            emit(c, "    fsub r%d, r%d, r%d", r, r, val);
+                            for (int j = 0; j < size; j++) {
+                                emit(c, "    fsub r%d, r%d, r%d", r + j, r + j, val + j);
+                            }
                         } else if (node->assign.op == TOK_STAR_ASSIGN) {
-                            emit(c, "    fmul r%d, r%d, r%d", r, r, val);
+                            for (int j = 0; j < size; j++) {
+                                emit(c, "    fmul r%d, r%d, r%d", r + j, r + j, val + j);
+                            }
                         } else if (node->assign.op == TOK_SLASH_ASSIGN) {
-                            emit(c, "    fdiv r%d, r%d, r%d", r, r, val);
+                            for (int j = 0; j < size; j++) {
+                                emit(c, "    fdiv r%d, r%d, r%d", r + j, r + j, val + j);
+                            }
                         }
                         return r;
                     }
@@ -1184,8 +1197,8 @@ static void gen_function(milo_compiler_t *c, milo_node_t *node) {
     emit(c, "; Function: %s", node->func.name);
     emit(c, "%s:", node->func.name);
     
-    /* Parameters */
-    int param_reg = 2;  /* r0 = zero, r1 = return value */
+    /* Parameters - add to symbol table but don't reset next_reg */
+    int param_reg = c->next_reg;
     for (milo_node_t *p = node->func.params; p; p = p->next) {
         if (c->symtab.count < MILO_MAX_SYMBOLS) {
             strcpy(c->symtab.symbols[c->symtab.count].name, p->var_decl.name);
@@ -1195,7 +1208,10 @@ static void gen_function(milo_compiler_t *c, milo_node_t *node) {
             param_reg += type_size(p->var_decl.var_type);
         }
     }
-    c->next_reg = param_reg;
+    /* Keep next_reg at max of current value and param allocation */
+    if (param_reg > c->next_reg) {
+        c->next_reg = param_reg;
+    }
     
     gen_stmt(c, node->func.body);
     

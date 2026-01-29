@@ -1,6 +1,12 @@
 # Build artifacts
 *.o
 miloc
+shader_test
+
+# Test output
+test_*.ppm
+test_*.png
+shader_tests_combined.png
 
 # Editor
 *~

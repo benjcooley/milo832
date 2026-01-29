@@ -207,6 +207,7 @@ TESTS=(
     "command_processor"
     "milo832_gpu"
     "vertex_fetch"
+    "viewport_transform"
 )
 
 # Track results

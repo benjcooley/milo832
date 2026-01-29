@@ -198,6 +198,7 @@ TESTS=(
     "texture_stress"
     "render_scene"
     "render_state"
+    "command_processor"
 )
 
 # Track results

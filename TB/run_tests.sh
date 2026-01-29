@@ -70,7 +70,7 @@ run_test() {
     
     # Run simulation
     local start_time=$(date +%s.%N)
-    if ghdl -r --workdir="$WORK_DIR" --std=08 "$tb_entity" --stop-time=100ms 2>&1 | tee "$WORK_DIR/${tb_entity}.log"; then
+    if ghdl -r --workdir="$WORK_DIR" --std=08 "$tb_entity" --stop-time=500ms 2>&1 | tee "$WORK_DIR/${tb_entity}.log"; then
         local end_time=$(date +%s.%N)
         local elapsed=$(echo "$end_time - $start_time" | bc)
         
@@ -144,7 +144,12 @@ for f in "$RTL_DIR/core/"*.vhd; do
     fi
 done
 
-# Graphics modules
+# Graphics modules - packages first
+if [ -f "$RTL_DIR/graphics/render_state_pkg.vhd" ]; then
+    compile_vhd "$RTL_DIR/graphics/render_state_pkg.vhd"
+    mark_compiled "render_state_pkg.vhd"
+fi
+
 for f in "$RTL_DIR/graphics/"*.vhd; do
     fname=$(basename "$f")
     if [ -f "$f" ] && ! is_compiled "$fname"; then
@@ -192,6 +197,7 @@ TESTS=(
     "gpu_core"
     "texture_stress"
     "render_scene"
+    "render_state"
 )
 
 # Track results

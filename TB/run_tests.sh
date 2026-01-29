@@ -179,6 +179,12 @@ if [ -d "$RTL_DIR/bus" ]; then
     done
 fi
 
+# Top-level GPU (depends on core, graphics, and bus)
+if [ -f "$RTL_DIR/milo832_gpu.vhd" ] && ! is_compiled "milo832_gpu.vhd"; then
+    compile_vhd "$RTL_DIR/milo832_gpu.vhd"
+    mark_compiled "milo832_gpu.vhd"
+fi
+
 # Compile testbenches
 echo ""
 echo "Compiling testbenches..."
@@ -199,6 +205,8 @@ TESTS=(
     "render_scene"
     "render_state"
     "command_processor"
+    "milo832_gpu"
+    "vertex_fetch"
 )
 
 # Track results

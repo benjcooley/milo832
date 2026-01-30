@@ -209,12 +209,23 @@ uint64_t milo_encode_inst(const milo_inst_t *inst) {
     word |= ((uint64_t)inst->rs1 << 40);
     word |= ((uint64_t)inst->rs2 << 32);
     
+    /* Default predicate guard to 0x7 (P7 = always true) if not specified */
+    uint8_t pred = inst->pred ? inst->pred : 0x7;
+    
+    /* Instruction format: {op[8], rd[8], rs1[8], rs2[8], pg[4], rs3[8], imm[20]}
+     * For 2-operand instructions without rs3, the format uses full 32-bit lower:
+     *   {op[8], rd[8], rs1[8], rs2[8], pg[4], unused[8], imm[20]}
+     * But the SM extracts pg from [31:28] always, so we embed it there */
+    
     if (inst->has_rs3) {
-        word |= ((uint64_t)(inst->pred & 0x0F) << 28);
+        /* 3-operand format */
+        word |= ((uint64_t)(pred & 0x0F) << 28);
         word |= ((uint64_t)inst->rs3 << 20);
         word |= (inst->imm & 0xFFFFF);
     } else {
-        word |= inst->imm;
+        /* 2-operand format - put pg at [31:28], imm at [19:0] */
+        word |= ((uint64_t)(pred & 0x0F) << 28);
+        word |= (inst->imm & 0xFFFFF);
     }
     
     return word;

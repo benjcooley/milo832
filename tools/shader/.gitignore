@@ -11,3 +11,4 @@ shader_tests_combined.png
 # Editor
 *~
 *.swp
+shader_verify

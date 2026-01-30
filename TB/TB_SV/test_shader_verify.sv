@@ -139,6 +139,39 @@ module test_shader_verify;
             $display("  Input[%0d] = %08h", i, input_mem[i]);
         end
     endtask
+    
+    // Load constant table from hex file into memory
+    task load_constants();
+        int fd;
+        logic [31:0] addr;
+        logic [31:0] val;
+        int count;
+        string const_file;
+        
+        const_file = {test_dir, "/", shader_name, "_const.hex"};
+        $display("Loading constants from %s", const_file);
+        
+        fd = $fopen(const_file, "r");
+        if (fd == 0) begin
+            $display("  No constant file (this may be okay)");
+            return;
+        end
+        
+        count = 0;
+        while (!$feof(fd)) begin
+            if ($fscanf(fd, "%h %h\n", addr, val) == 2) begin
+                // Store in mock memory at the specified byte address
+                // Mock memory is word-addressed: mem[0][word*32 +: 32]
+                int word_idx = addr / 4;
+                dut.dut_memory.mem[0][word_idx*32 +: 32] = val;
+                $display("  Const[0x%04h] = %08h", addr, val);
+                count++;
+            end
+        end
+        
+        $fclose(fd);
+        $display("Loaded %0d constants", count);
+    endtask
 
     // Build the wrapped program:
     // - Prologue: Load inputs from memory into registers
@@ -241,6 +274,7 @@ module test_shader_verify;
         // Load shader and inputs BEFORE reset
         load_shader();
         load_inputs();
+        load_constants();
         
         // Reset
         rst_n = 0;

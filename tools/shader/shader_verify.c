@@ -233,6 +233,49 @@ static bool generate_test_files(const char *output_dir) {
             printf("  Wrote %s\n", path);
         }
         
+        /* Write constant data hex file (memory values at constant table addresses) */
+        /* Parse .data directives from assembly */
+        snprintf(path, sizeof(path), "%s/%s_const.hex", output_dir, name);
+        f = fopen(path, "w");
+        if (f) {
+            const char *p = asm_code;
+            int const_count = 0;
+            while ((p = strstr(p, ".data ")) != NULL) {
+                p += 6;
+                while (*p == ' ' || *p == '\t') p++;
+                
+                /* Parse address and value */
+                uint32_t addr = 0, value = 0;
+                if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+                    p += 2;
+                    while ((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')) {
+                        addr = addr * 16;
+                        if (*p >= '0' && *p <= '9') addr += *p - '0';
+                        else if (*p >= 'a' && *p <= 'f') addr += *p - 'a' + 10;
+                        else addr += *p - 'A' + 10;
+                        p++;
+                    }
+                }
+                while (*p == ',' || *p == ' ' || *p == '\t') p++;
+                if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+                    p += 2;
+                    while ((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')) {
+                        value = value * 16;
+                        if (*p >= '0' && *p <= '9') value += *p - '0';
+                        else if (*p >= 'a' && *p <= 'f') value += *p - 'a' + 10;
+                        else value += *p - 'A' + 10;
+                        p++;
+                    }
+                }
+                fprintf(f, "%04X %08X\n", addr, value);
+                const_count++;
+            }
+            fclose(f);
+            if (const_count > 0) {
+                printf("  Wrote %s (%d constants)\n", path, const_count);
+            }
+        }
+        
         /* Run VM for each test input and write expected outputs */
         for (size_t i = 0; i < NUM_TEST_INPUTS; i++) {
             /* Write input file */

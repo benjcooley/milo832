@@ -10,9 +10,9 @@ main:
     mov r8, r12
     mov r13, r3  ; .y
     mov r9, r13
-    addi r14, r0, 0x3F000000  ; 0.500000
+    ldr r14, r0, 4096  ; 0.500000
     mov r10, r14
-    addi r15, r0, 0x3F800000  ; 1.000000
+    ldr r15, r0, 4100  ; 1.000000
     mov r11, r15
     mov r4, r8
     mov r5, r9
@@ -20,3 +20,8 @@ main:
     mov r7, r11
     exit
 
+
+; Constant data section
+; Base address: 0x1000 (2 constants)
+.data 0x1000, 0x3F000000  ; 0.500000
+.data 0x1004, 0x3F800000  ; 1.000000

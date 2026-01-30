@@ -43,7 +43,15 @@ static inline uint8_t inst_opcode(uint64_t inst) { return (inst >> 56) & 0xFF; }
 static inline uint8_t inst_rd(uint64_t inst)     { return (inst >> 48) & 0xFF; }
 static inline uint8_t inst_rs1(uint64_t inst)    { return (inst >> 40) & 0xFF; }
 static inline uint8_t inst_rs2(uint64_t inst)    { return (inst >> 32) & 0xFF; }
-static inline uint32_t inst_imm(uint64_t inst)   { return inst & 0xFFFFFFFF; }
+/* Extract 20-bit immediate and sign-extend to 32 bits (matching SM behavior) */
+static inline int32_t inst_imm(uint64_t inst) {
+    int32_t imm20 = inst & 0xFFFFF;
+    /* Sign extend from 20-bit to 32-bit */
+    if (imm20 & 0x80000) {
+        imm20 |= 0xFFF00000;
+    }
+    return imm20;
+}
 static inline uint8_t inst_rs3(uint64_t inst)    { return (inst >> 20) & 0xFF; }
 
 /*---------------------------------------------------------------------------
@@ -192,7 +200,55 @@ bool milo_vm_load_asm(milo_vm_t *vm, const char *asm_text) {
     
     uint32_t size;
     const uint64_t *code = milo_asm_get_code(&as, &size);
-    return milo_vm_load_binary(vm, code, size);
+    if (!milo_vm_load_binary(vm, code, size)) {
+        return false;
+    }
+    
+    /* Parse .data directives to load constant table into memory */
+    const char *p = asm_text;
+    while ((p = strstr(p, ".data ")) != NULL) {
+        /* Format: .data 0xADDR, 0xVALUE */
+        p += 6;  /* Skip ".data " */
+        
+        /* Skip whitespace */
+        while (*p == ' ' || *p == '\t') p++;
+        
+        /* Parse address */
+        uint32_t addr = 0;
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+            p += 2;
+            while ((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')) {
+                addr = addr * 16;
+                if (*p >= '0' && *p <= '9') addr += *p - '0';
+                else if (*p >= 'a' && *p <= 'f') addr += *p - 'a' + 10;
+                else addr += *p - 'A' + 10;
+                p++;
+            }
+        }
+        
+        /* Skip comma and whitespace */
+        while (*p == ',' || *p == ' ' || *p == '\t') p++;
+        
+        /* Parse value */
+        uint32_t value = 0;
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+            p += 2;
+            while ((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')) {
+                value = value * 16;
+                if (*p >= '0' && *p <= '9') value += *p - '0';
+                else if (*p >= 'a' && *p <= 'f') value += *p - 'a' + 10;
+                else value += *p - 'A' + 10;
+                p++;
+            }
+        }
+        
+        /* Store in memory */
+        if (addr < VM_MEM_SIZE) {
+            vm->mem[addr / 4] = value;
+        }
+    }
+    
+    return true;
 }
 
 void milo_vm_set_uniform_float(milo_vm_t *vm, int index, float value) {
@@ -582,12 +638,31 @@ static bool vm_step(milo_vm_t *vm) {
             break;
         }
             
-        /* Memory - not implemented for fragment shader sim */
-        case OP_LDR:
-        case OP_STR:
+        /* Memory operations */
+        case OP_LDR: {
+            /* LDR rd, rs1, imm - Load word from memory[rs1 + imm] */
+            uint32_t addr = vm->regs[rs1].u + imm;
+            if (addr < VM_MEM_SIZE) {
+                uint32_t word_idx = addr / 4;
+                vm->regs[rd].u = vm->mem[word_idx];
+            } else {
+                /* Out of bounds - return zero */
+                vm->regs[rd].u = 0;
+            }
+            break;
+        }
+        case OP_STR: {
+            /* STR rd, rs1, imm - Store word to memory[rs1 + imm] */
+            uint32_t addr = vm->regs[rs1].u + imm;
+            if (addr < VM_MEM_SIZE) {
+                uint32_t word_idx = addr / 4;
+                vm->mem[word_idx] = vm->regs[rs2].u;  /* rs2 is source for STR */
+            }
+            break;
+        }
         case OP_LDS:
         case OP_STS:
-            /* No-op for now */
+            /* Shared memory - not implemented */
             break;
             
         default:

@@ -7,16 +7,16 @@
 ; Function: main
 main:
     mov r9, r2  ; .x
-    addi r10, r0, 0x40000000  ; 2.000000
+    ldr r10, r0, 4096  ; 2.000000
     fmul r11, r9, r10
     mov r8, r11  ; a
     mov r13, r3  ; .y
-    addi r14, r0, 0x3F000000  ; 0.500000
+    ldr r14, r0, 4100  ; 0.500000
     fadd r15, r13, r14
     mov r12, r15  ; b
     fmul r17, r8, r12
     mov r16, r17  ; c
-    addi r19, r0, 0x3DCCCCCD  ; 0.100000
+    ldr r19, r0, 4104  ; 0.100000
     fadd r20, r16, r19
     sqrt r21, r20
     mov r18, r21  ; d
@@ -30,3 +30,9 @@ main:
     mov r7, r25
     exit
 
+
+; Constant data section
+; Base address: 0x1000 (3 constants)
+.data 0x1000, 0x40000000  ; 2.000000
+.data 0x1004, 0x3F000000  ; 0.500000
+.data 0x1008, 0x3DCCCCCD  ; 0.100000

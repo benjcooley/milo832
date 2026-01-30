@@ -54,11 +54,11 @@ static const opcode_entry_t opcode_table[] = {
     {"shr",     OP_SHR,     3, "rrr"},
     {"sha",     OP_SHA,     3, "rrr"},
     
-    /* Memory */
-    {"ldr",     OP_LDR,     2, "rr"},
-    {"str",     OP_STR,     2, "rr"},
-    {"lds",     OP_LDS,     2, "rr"},
-    {"sts",     OP_STS,     2, "rr"},
+    /* Memory - LDR/STR take rd, rs1, imm (address = rs1 + imm) */
+    {"ldr",     OP_LDR,     3, "rri"},
+    {"str",     OP_STR,     3, "rri"},
+    {"lds",     OP_LDS,     3, "rri"},
+    {"sts",     OP_STS,     3, "rri"},
     
     /* Control Flow */
     {"beq",     OP_BEQ,     3, "rrl"},
@@ -302,6 +302,11 @@ bool milo_asm_line(milo_asm_t *as, const char *line, int line_num) {
         mnemonic[i++] = tolower(*p++);
     }
     mnemonic[i] = '\0';
+    
+    /* Skip data directives (handled by VM loader separately) */
+    if (strcmp(mnemonic, ".data") == 0) {
+        return true;  /* Not an error, just skip */
+    }
     
     const opcode_entry_t *op = find_opcode(mnemonic);
     if (!op) {

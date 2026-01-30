@@ -317,6 +317,8 @@ typedef struct {
 
 #define MILO_MAX_CODE 4096
 #define MILO_MAX_ERRORS 32
+#define MILO_MAX_CONSTANTS 256
+#define MILO_CONST_BASE_ADDR 0x1000  /* Memory address for constant table */
 
 typedef struct {
     /* Source */
@@ -339,6 +341,10 @@ typedef struct {
     int         code_count;
     int         next_reg;
     int         next_label;
+    
+    /* Constant table - float constants loaded from memory */
+    uint32_t    constants[MILO_MAX_CONSTANTS];
+    int         const_count;
     
     /* Errors */
     char        errors[MILO_MAX_ERRORS][256];

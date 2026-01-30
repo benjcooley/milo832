@@ -7,12 +7,12 @@
 ; Function: main
 main:
     mov r9, r2  ; .x
-    addi r10, r0, 0x40C90E56  ; 6.283000
+    ldr r10, r0, 4096  ; 6.283000
     fmul r11, r9, r10
     sin r12, r11
     mov r8, r12  ; s
     mov r14, r3  ; .y
-    addi r15, r0, 0x40C90E56  ; 6.283000
+    ldr r15, r0, 4096  ; 6.283000
     fmul r16, r14, r15
     cos r17, r16
     mov r13, r17  ; c
@@ -25,18 +25,18 @@ main:
     fadd r25, r21, r24
     sqrt r26, r25
     mov r18, r26  ; e
-    addi r31, r0, 0x3F000000  ; 0.500000
+    ldr r31, r0, 4100  ; 0.500000
     fmul r32, r8, r31
-    addi r33, r0, 0x3F000000  ; 0.500000
+    ldr r33, r0, 4100  ; 0.500000
     fadd r34, r32, r33
     mov r27, r34
-    addi r35, r0, 0x3F000000  ; 0.500000
+    ldr r35, r0, 4100  ; 0.500000
     fmul r36, r13, r35
-    addi r37, r0, 0x3F000000  ; 0.500000
+    ldr r37, r0, 4100  ; 0.500000
     fadd r38, r36, r37
     mov r28, r38
     mov r29, r18
-    addi r39, r0, 0x3F800000  ; 1.000000
+    ldr r39, r0, 4104  ; 1.000000
     mov r30, r39
     mov r4, r27
     mov r5, r28
@@ -44,3 +44,9 @@ main:
     mov r7, r30
     exit
 
+
+; Constant data section
+; Base address: 0x1000 (3 constants)
+.data 0x1000, 0x40C90E56  ; 6.283000
+.data 0x1004, 0x3F000000  ; 0.500000
+.data 0x1008, 0x3F800000  ; 1.000000

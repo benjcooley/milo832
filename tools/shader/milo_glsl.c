@@ -831,6 +831,24 @@ static int alloc_label(milo_compiler_t *c) {
     return c->next_label++;
 }
 
+/* Add a constant to the constant table and return its memory address */
+static int add_constant(milo_compiler_t *c, uint32_t value) {
+    /* Check if constant already exists */
+    for (int i = 0; i < c->const_count; i++) {
+        if (c->constants[i] == value) {
+            return MILO_CONST_BASE_ADDR + (i * 4);
+        }
+    }
+    /* Add new constant */
+    if (c->const_count >= MILO_MAX_CONSTANTS) {
+        error(c, "Too many constants");
+        return MILO_CONST_BASE_ADDR;
+    }
+    int addr = MILO_CONST_BASE_ADDR + (c->const_count * 4);
+    c->constants[c->const_count++] = value;
+    return addr;
+}
+
 static int type_size(milo_type_t t) {
     switch (t) {
         case TYPE_FLOAT:
@@ -854,7 +872,15 @@ static int gen_expr(milo_compiler_t *c, milo_node_t *node) {
     switch (node->type) {
         case NODE_INT_LIT: {
             int r = alloc_reg(c);
-            emit(c, "    addi r%d, r0, %d", r, node->int_val);
+            int32_t val = node->int_val;
+            /* Check if value fits in 20-bit signed immediate (-524288 to 524287) */
+            if (val >= -524288 && val <= 524287) {
+                emit(c, "    addi r%d, r0, %d", r, val);
+            } else {
+                /* Load from constant table */
+                int addr = add_constant(c, (uint32_t)val);
+                emit(c, "    ldr r%d, r0, %d  ; int %d", r, addr, val);
+            }
             return r;
         }
         
@@ -862,7 +888,9 @@ static int gen_expr(milo_compiler_t *c, milo_node_t *node) {
             int r = alloc_reg(c);
             union { float f; uint32_t u; } conv;
             conv.f = node->float_val;
-            emit(c, "    addi r%d, r0, 0x%08X  ; %.6f", r, conv.u, node->float_val);
+            /* Float constants must be loaded from constant table (32-bit values) */
+            int addr = add_constant(c, conv.u);
+            emit(c, "    ldr r%d, r0, %d  ; %.6f", r, addr, node->float_val);
             return r;
         }
         
@@ -1301,9 +1329,27 @@ const char *milo_glsl_get_asm(milo_compiler_t *c) {
     static char buf[MILO_MAX_CODE * 128];
     buf[0] = '\0';
     
+    /* Output code */
     for (int i = 0; i < c->code_count; i++) {
         strcat(buf, c->code[i]);
         strcat(buf, "\n");
+    }
+    
+    /* Output constant table data section */
+    if (c->const_count > 0) {
+        strcat(buf, "\n; Constant data section\n");
+        char line[128];
+        snprintf(line, sizeof(line), "; Base address: 0x%04X (%d constants)\n", 
+                MILO_CONST_BASE_ADDR, c->const_count);
+        strcat(buf, line);
+        
+        for (int i = 0; i < c->const_count; i++) {
+            union { uint32_t u; float f; } conv;
+            conv.u = c->constants[i];
+            snprintf(line, sizeof(line), ".data 0x%04X, 0x%08X  ; %.6f\n", 
+                    MILO_CONST_BASE_ADDR + (i * 4), c->constants[i], conv.f);
+            strcat(buf, line);
+        }
     }
     
     return buf;

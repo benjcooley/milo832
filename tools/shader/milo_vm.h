@@ -21,6 +21,7 @@
 #define VM_MAX_UNIFORMS     32
 #define VM_MAX_TEXTURES     8
 #define VM_STACK_SIZE       256
+#define VM_MEM_SIZE         8192    /* Memory for constant tables etc */
 
 /*---------------------------------------------------------------------------
  * Texture
@@ -127,6 +128,9 @@ typedef struct {
     
     /* Textures */
     milo_texture_t *textures[VM_MAX_TEXTURES];
+    
+    /* Memory (for constant tables, etc) */
+    uint32_t    mem[VM_MEM_SIZE / 4];
     
     /* Execution state */
     bool        running;

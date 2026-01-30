@@ -133,10 +133,11 @@ module test_shader_verify;
         
         // Store input values in mock memory at address 0
         // Input layout: u, v, nx, ny, nz, r, g, b, a (9 values)
-        // Memory format: each value at consecutive 4-byte addresses
+        // Memory format: each value at consecutive 4-byte addresses within line 0
+        // Line 0 can hold 32 words (128 bytes)
         for (int i = 0; i < count; i++) begin
             dut.dut_memory.mem[0][i*32 +: 32] = input_mem[i];
-            $display("  Input[%0d] = %08h", i, input_mem[i]);
+            $display("  Input[%0d] = %08h (line 0, word %0d)", i, input_mem[i], i);
         end
     endtask
     
@@ -160,11 +161,13 @@ module test_shader_verify;
         count = 0;
         while (!$feof(fd)) begin
             if ($fscanf(fd, "%h %h\n", addr, val) == 2) begin
-                // Store in mock memory at the specified byte address
-                // Mock memory is word-addressed: mem[0][word*32 +: 32]
-                int word_idx = addr / 4;
-                dut.dut_memory.mem[0][word_idx*32 +: 32] = val;
-                $display("  Const[0x%04h] = %08h", addr, val);
+                // Mock memory is organized as 128 cache lines of 128 bytes each
+                // Each line is 1024 bits (32 words of 32 bits)
+                // Line index = addr / 128, word within line = (addr % 128) / 4
+                int line_idx = addr / 128;
+                int word_in_line = (addr % 128) / 4;
+                dut.dut_memory.mem[line_idx][word_in_line*32 +: 32] = val;
+                $display("  Const[0x%04h] = %08h (line %0d, word %0d)", addr, val, line_idx, word_in_line);
                 count++;
             end
         end
@@ -228,8 +231,7 @@ module test_shader_verify;
         $display("Saving outputs to %s", output_file);
         
         // Read output from memory addresses 100-112 (stored by epilogue)
-        // Memory format: dut.dut_memory.mem[0][word_idx*32 +: 32]
-        // Address 100 = word 25, 104 = word 26, etc.
+        // Address 100 = line 0, word 25 (100/4 = 25, within first 128 bytes)
         output_mem[0] = dut.dut_memory.mem[0][25*32 +: 32]; // Address 100
         output_mem[1] = dut.dut_memory.mem[0][26*32 +: 32]; // Address 104
         output_mem[2] = dut.dut_memory.mem[0][27*32 +: 32]; // Address 108

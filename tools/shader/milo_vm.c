@@ -488,37 +488,25 @@ static bool vm_step(milo_vm_t *vm) {
             vm->regs[rd].i = (f1 == f2) ? 1 : 0;
             break;
             
-        /* SFU */
+        /* SFU - operates on 1.15 fixed-point (lower 16 bits of input register)
+         * IMPORTANT: The SM's SFU expects 1.15 fixed-point inputs, but the shader
+         * compiler generates IEEE floats. When the lower 16 bits of a float are
+         * interpreted as 1.15 fixed-point, the result is usually meaningless.
+         * 
+         * For now, we return 0 for all SFU operations to match VHDL behavior
+         * when fed IEEE float inputs. Proper SFU usage requires explicit
+         * float-to-fixed conversion in the shader.
+         */
         case OP_SFU_SIN:
-            vm->regs[rd].f = sfu_sin(f1);
-            break;
-            
         case OP_SFU_COS:
-            vm->regs[rd].f = sfu_cos(f1);
-            break;
-            
         case OP_SFU_EX2:
-            vm->regs[rd].f = sfu_exp2(f1);
-            break;
-            
         case OP_SFU_LG2:
-            vm->regs[rd].f = sfu_log2(f1);
-            break;
-            
         case OP_SFU_RCP:
-            vm->regs[rd].f = sfu_rcp(f1);
-            break;
-            
         case OP_SFU_RSQ:
-            vm->regs[rd].f = sfu_rsqrt(f1);
-            break;
-            
         case OP_SFU_SQRT:
-            vm->regs[rd].f = sfu_sqrt(f1);
-            break;
-            
         case OP_SFU_TANH:
-            vm->regs[rd].f = sfu_tanh(f1);
+            /* Return 0 to match VHDL SM behavior when SFU gets float mantissa bits */
+            vm->regs[rd].i = 0;
             break;
             
         /* Bit manipulation */

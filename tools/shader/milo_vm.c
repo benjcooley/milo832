@@ -179,6 +179,72 @@ void milo_vm_init(milo_vm_t *vm) {
     vm->max_cycles = 100000;  /* Prevent infinite loops */
 }
 
+/* Helper to load a hex LUT file (one 16-bit value per line) */
+static bool load_sfu_table(const char *path, int16_t *table, int size) {
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+    
+    char line[32];
+    int i = 0;
+    while (i < size && fgets(line, sizeof(line), f)) {
+        unsigned int val;
+        if (sscanf(line, "%x", &val) == 1) {
+            table[i++] = (int16_t)val;
+        }
+    }
+    fclose(f);
+    return (i == size);
+}
+
+bool milo_vm_set_sfu_strict(milo_vm_t *vm, const char *table_dir) {
+    char path[512];
+    
+    snprintf(path, sizeof(path), "%s/sine_table_256.hex", table_dir);
+    if (!load_sfu_table(path, vm->sfu_lut_sin, 256)) {
+        snprintf(vm->error, sizeof(vm->error), "Failed to load %s", path);
+        return false;
+    }
+    
+    snprintf(path, sizeof(path), "%s/exp2_table_256.hex", table_dir);
+    if (!load_sfu_table(path, vm->sfu_lut_exp2, 256)) {
+        snprintf(vm->error, sizeof(vm->error), "Failed to load %s", path);
+        return false;
+    }
+    
+    snprintf(path, sizeof(path), "%s/log2_table_256.hex", table_dir);
+    if (!load_sfu_table(path, vm->sfu_lut_log2, 256)) {
+        snprintf(vm->error, sizeof(vm->error), "Failed to load %s", path);
+        return false;
+    }
+    
+    snprintf(path, sizeof(path), "%s/rcp_table_256.hex", table_dir);
+    if (!load_sfu_table(path, vm->sfu_lut_rcp, 256)) {
+        snprintf(vm->error, sizeof(vm->error), "Failed to load %s", path);
+        return false;
+    }
+    
+    snprintf(path, sizeof(path), "%s/rsq_table_256.hex", table_dir);
+    if (!load_sfu_table(path, vm->sfu_lut_rsq, 256)) {
+        snprintf(vm->error, sizeof(vm->error), "Failed to load %s", path);
+        return false;
+    }
+    
+    snprintf(path, sizeof(path), "%s/sqrt_table_256.hex", table_dir);
+    if (!load_sfu_table(path, vm->sfu_lut_sqrt, 256)) {
+        snprintf(vm->error, sizeof(vm->error), "Failed to load %s", path);
+        return false;
+    }
+    
+    snprintf(path, sizeof(path), "%s/tanh_table_256.hex", table_dir);
+    if (!load_sfu_table(path, vm->sfu_lut_tanh, 256)) {
+        snprintf(vm->error, sizeof(vm->error), "Failed to load %s", path);
+        return false;
+    }
+    
+    vm->sfu_strict = true;
+    return true;
+}
+
 bool milo_vm_load_binary(milo_vm_t *vm, const uint64_t *code, uint32_t size) {
     if (size > VM_MAX_CODE) {
         snprintf(vm->error, sizeof(vm->error), "Code too large (%u > %d)", size, VM_MAX_CODE);
@@ -489,13 +555,8 @@ static bool vm_step(milo_vm_t *vm) {
             break;
             
         /* SFU - operates on 1.15 fixed-point (lower 16 bits of input register)
-         * IMPORTANT: The SM's SFU expects 1.15 fixed-point inputs, but the shader
-         * compiler generates IEEE floats. When the lower 16 bits of a float are
-         * interpreted as 1.15 fixed-point, the result is usually meaningless.
-         * 
-         * For now, we return 0 for all SFU operations to match VHDL behavior
-         * when fed IEEE float inputs. Proper SFU usage requires explicit
-         * float-to-fixed conversion in the shader.
+         * In strict mode: replicates VHDL LUT + interpolation exactly
+         * In fast mode: uses native C math (for development/debugging)
          */
         case OP_SFU_SIN:
         case OP_SFU_COS:
@@ -504,10 +565,100 @@ static bool vm_step(milo_vm_t *vm) {
         case OP_SFU_RCP:
         case OP_SFU_RSQ:
         case OP_SFU_SQRT:
-        case OP_SFU_TANH:
-            /* Return 0 to match VHDL SM behavior when SFU gets float mantissa bits */
-            vm->regs[rd].i = 0;
+        case OP_SFU_TANH: {
+            /* Extract 16-bit operand (1.15 fixed-point) */
+            uint16_t operand = (uint16_t)(u1 & 0xFFFF);
+            int16_t result16;
+            
+            if (vm->sfu_strict) {
+                /* Strict mode: match VHDL LUT + linear interpolation exactly */
+                /* idx = operand[15:8], frac = operand[7:0] */
+                uint8_t idx = (operand >> 8) & 0xFF;
+                uint8_t frac = operand & 0xFF;
+                
+                int16_t val_a, val_b;
+                int16_t *lut = NULL;
+                int16_t wrap_val = 0;
+                
+                switch (op) {
+                    case OP_SFU_SIN:
+                        lut = vm->sfu_lut_sin;
+                        wrap_val = vm->sfu_lut_sin[0];  /* Wrap to start */
+                        break;
+                    case OP_SFU_COS: {
+                        /* cos(x) = sin(x + 0x4000) */
+                        uint16_t cos_operand = operand + 0x4000;
+                        idx = (cos_operand >> 8) & 0xFF;
+                        frac = cos_operand & 0xFF;
+                        lut = vm->sfu_lut_sin;
+                        wrap_val = vm->sfu_lut_sin[0];
+                        break;
+                    }
+                    case OP_SFU_EX2:
+                        lut = vm->sfu_lut_exp2;
+                        wrap_val = 0x7FFF;
+                        break;
+                    case OP_SFU_LG2:
+                        lut = vm->sfu_lut_log2;
+                        wrap_val = 0x7FFF;
+                        break;
+                    case OP_SFU_RCP:
+                        lut = vm->sfu_lut_rcp;
+                        wrap_val = 0x4000;
+                        break;
+                    case OP_SFU_RSQ:
+                        lut = vm->sfu_lut_rsq;
+                        wrap_val = 0x5A82;
+                        break;
+                    case OP_SFU_SQRT:
+                        lut = vm->sfu_lut_sqrt;
+                        wrap_val = 0x5A82;
+                        break;
+                    case OP_SFU_TANH:
+                        lut = vm->sfu_lut_tanh;
+                        wrap_val = 0x7FDD;
+                        break;
+                    default:
+                        lut = NULL;
+                }
+                
+                if (lut) {
+                    val_a = lut[idx];
+                    val_b = (idx == 255) ? wrap_val : lut[idx + 1];
+                    
+                    /* Linear interpolation: result = val_a + frac * (val_b - val_a) >> 8 */
+                    int32_t delta = ((int32_t)(val_b - val_a) * (int32_t)frac) >> 8;
+                    result16 = val_a + (int16_t)delta;
+                } else {
+                    result16 = 0;
+                }
+            } else {
+                /* Fast mode: use native C math on the fixed-point value */
+                float norm_in = (float)(int16_t)operand / 32768.0f;
+                float result_f;
+                
+                switch (op) {
+                    case OP_SFU_SIN:  result_f = sfu_sin(norm_in * 6.28318530718f); break;
+                    case OP_SFU_COS:  result_f = sfu_cos(norm_in * 6.28318530718f); break;
+                    case OP_SFU_EX2:  result_f = sfu_exp2(norm_in); break;
+                    case OP_SFU_LG2:  result_f = sfu_log2(fabsf(norm_in) + 0.0001f); break;
+                    case OP_SFU_RCP:  result_f = sfu_rcp(norm_in); break;
+                    case OP_SFU_RSQ:  result_f = sfu_rsqrt(fabsf(norm_in) + 0.0001f); break;
+                    case OP_SFU_SQRT: result_f = sfu_sqrt(fabsf(norm_in)); break;
+                    case OP_SFU_TANH: result_f = sfu_tanh(norm_in); break;
+                    default: result_f = 0.0f;
+                }
+                
+                /* Clamp and convert back to 1.15 */
+                if (result_f > 0.99997f) result_f = 0.99997f;
+                if (result_f < -1.0f) result_f = -1.0f;
+                result16 = (int16_t)(result_f * 32768.0f);
+            }
+            
+            /* Sign-extend 16-bit result to 32-bit */
+            vm->regs[rd].i = (int32_t)result16;
             break;
+        }
             
         /* Bit manipulation */
         case OP_POPC: {

@@ -138,6 +138,16 @@ typedef struct {
     int         cycle_count;
     int         max_cycles;
     
+    /* SFU strict mode - replicates VHDL 1.15 fixed-point LUT exactly */
+    bool        sfu_strict;
+    int16_t     sfu_lut_sin[256];
+    int16_t     sfu_lut_exp2[256];
+    int16_t     sfu_lut_log2[256];
+    int16_t     sfu_lut_rcp[256];
+    int16_t     sfu_lut_rsq[256];
+    int16_t     sfu_lut_sqrt[256];
+    int16_t     sfu_lut_tanh[256];
+    
     /* Error state */
     char        error[256];
 } milo_vm_t;
@@ -148,6 +158,11 @@ typedef struct {
 
 /* Initialize VM */
 void milo_vm_init(milo_vm_t *vm);
+
+/* Enable SFU strict mode - loads LUT tables to match VHDL 1.15 fixed-point exactly
+ * table_dir: path to directory containing SFU_Tables (*.hex files)
+ * Returns false if tables cannot be loaded */
+bool milo_vm_set_sfu_strict(milo_vm_t *vm, const char *table_dir);
 
 /* Load program from binary */
 bool milo_vm_load_binary(milo_vm_t *vm, const uint64_t *code, uint32_t size);
